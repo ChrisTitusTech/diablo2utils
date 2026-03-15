@@ -1,4 +1,5 @@
 import { Diablo2MpqLoader } from '@diablo2/bintools';
+import { Difficulty } from '@diablo2/data';
 import de from 'dotenv';
 import 'source-map-support/register.js';
 import { Diablo2Process } from './d2.js';
@@ -33,6 +34,18 @@ async function main(): Promise<void> {
 
   Log.info({ procId: proc.process.pid }, 'Process:Found');
   const session = new Diablo2GameSessionMemory(proc, playerName);
+
+  // When the map seed changes, log a URL for the @diablo2/map server so the
+  // current map layout can be viewed immediately in a browser.
+  // Set MAP_SERVER_URL env var to override the default (e.g. "http://localhost:8899").
+  const mapServerUrl = (process.env['MAP_SERVER_URL'] ?? 'http://localhost:8899').replace(/\/$/, '');
+  session.onMapChange = (seed: number, difficulty: Difficulty, act: number): void => {
+    const diffStr = Difficulty[difficulty].toLowerCase();
+    const url = `${mapServerUrl}/v1/map/${seed}/${diffStr}/${act}.json`;
+    Log.info({ seed, difficulty: Difficulty[difficulty], act, url }, 'Map:Changed');
+    console.log(`\n  Map layout: ${url}\n`);
+  };
+
   await session.start(Log);
 }
 

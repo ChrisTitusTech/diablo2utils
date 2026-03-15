@@ -1,10 +1,11 @@
 import { Diablo2State } from '@diablo2/core';
-import { Attribute, Diablo2Mpq, getNpcFlags, ItemQuality, NpcResists, UnitType } from '@diablo2/data';
-import { bp, toHex } from 'binparse';
+import { Attribute, Difficulty, Diablo2Mpq, getNpcFlags, ItemQuality, NpcResists, UnitType } from '@diablo2/data';
+import { toHex } from 'binparse';
 import { Diablo2ItemJson, Diablo2NpcJson } from 'packages/state/build/json.js';
 import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
+import { D2rActMiscStrut } from './struts/d2r.act.js';
 import { PointerUnitDataItem, PointerUnitDataNpc } from './struts/d2r.unit.any.js';
 
 const sleep = (dur: number): Promise<void> => new Promise((r) => setTimeout(r, dur));
@@ -18,7 +19,9 @@ export class Diablo2GameSessionMemory {
   /** Delay to wait between ticks */
   tickSpeed = 250;
 
-  mapSeed: number;
+  /** Callback fired whenever the map seed, act, or difficulty changes */
+  onMapChange?: (seed: number, difficulty: Difficulty, act: number) => void;
+
   itemIgnore = new Set<string>();
 
   constructor(proc: Diablo2Process, playerName: string) {
@@ -82,17 +85,24 @@ export class Diablo2GameSessionMemory {
     const path = await obj.getPath(player, logger);
     const act = await obj.getAct(player, logger);
 
-    const mapSeed = await obj.d2.readStrutAt(this.mapSeed, bp.lu32);
+    // Load ActMisc once to get both mapSeed and difficulty without double-fetching
+    const actMisc = act.pActMisc.isValid
+      ? await obj.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut)
+      : null;
+    const mapSeed = actMisc?.mapSeed ?? 0;
+
     this.state.map.act = player.actId;
 
     // Track map information
-    if (mapSeed !== this.state.map.id) {
+    if (mapSeed !== 0 && mapSeed !== this.state.map.id) {
       this.state.map.id = mapSeed;
-      this.state.map.difficulty = await obj.getDifficulty(act, logger);
+      // Use value already loaded from actMisc; fall back to CLI-flag detection if actMisc unavailable
+      this.state.map.difficulty = actMisc?.difficulty ?? (await obj.getDifficulty(act, logger));
       this.state.log.info({ map: this.state.map }, 'MapSeed:Changed');
       this.state.units.clear();
       this.state.items.clear();
       this.itemIgnore.clear();
+      this.onMapChange?.(mapSeed, this.state.map.difficulty, player.actId);
     }
 
     // Track player location
