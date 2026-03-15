@@ -86,14 +86,48 @@ else
     DOCKER_CMD="docker"
 fi
 
-# ─── D2 path ─────────────────────────────────────────────────────────────────
-D2_PATH="${D2_PATH:-$HOME/.steam/steam/steamapps/common/Diablo II Resurrected}"
-if [ ! -d "$D2_PATH" ]; then
-    warn "Diablo II Resurrected not found at: $D2_PATH"
-    warn "Set the D2_PATH environment variable before running run.sh."
-    warn "Example: D2_PATH=\"/path/to/Diablo II Resurrected\" ./run.sh"
+# ─── D2 game data (MPQ files) ───────────────────────────────────────────────
+# Classic Diablo II v1.13c DLLs are committed in assets/d2/.
+# The MPQ game-data files (~1.9 GB) are not stored in git.  install.sh locates
+# the user's existing Diablo II install and symlinks the MPQs into assets/d2/
+# so that directory is a self-contained D2_PATH for d2-map.exe.
+D2_PATH="${D2_PATH:-$REPO_ROOT/assets/d2}"
+
+D2_DATA_SRC=""
+for _try in \
+    "$HOME/games/diablo-ii/drive_c/Program Files (x86)/Diablo II" \
+    "$HOME/games/diablo-ii/pfx/drive_c/Program Files (x86)/Diablo II" \
+    "$HOME/.wine/drive_c/Program Files (x86)/Diablo II" \
+    "$HOME/.wine/drive_c/Program Files/Diablo II" \
+    "$HOME/GOG Games/Diablo II"; do
+    if ls "$_try"/*.mpq &>/dev/null 2>&1; then
+        D2_DATA_SRC="$_try"
+        break
+    fi
+done
+
+if [ -n "$D2_DATA_SRC" ]; then
+    info "Symlinking MPQ files from: $D2_DATA_SRC"
+    for _mpq in "$D2_DATA_SRC"/*.mpq "$D2_DATA_SRC"/*.MPQ; do
+        [ -f "$_mpq" ] || continue
+        _name="$(basename "$_mpq")"
+        if [ ! -e "$D2_PATH/$_name" ]; then
+            ln -s "$_mpq" "$D2_PATH/$_name"
+            info "  → $_name"
+        else
+            info "  → $_name (already linked)"
+        fi
+    done
 else
-    info "D2 path found: $D2_PATH"
+    warn "No classic Diablo II install with MPQ files found."
+    warn "Map generation will fail until *.mpq files are present in: $D2_PATH"
+    warn "Either install Diablo II to a standard location or symlink the MPQs manually."
+fi
+
+if [ ! -f "$D2_PATH/Game.exe" ]; then
+    err "Game.exe not found in $D2_PATH — something went wrong with asset setup."
+else
+    info "D2 assets ready at: $D2_PATH"
 fi
 
 # ─── Node / JS build ─────────────────────────────────────────────────────────

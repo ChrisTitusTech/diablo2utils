@@ -21,18 +21,11 @@ const char *dlls[] = {
 };
 
 DWORD GetDllOffset(const char *DllName, int Offset) {
-    try {
-        HMODULE hMod = GetModuleHandle(DllName);
-        if (!hMod) hMod = LoadLibrary(DllName);
-        if (!hMod) return 0;
-        if (Offset < 0)return (DWORD)GetProcAddress(hMod, (LPCSTR)(-Offset));
-        return ((DWORD)hMod) + Offset;
-    } catch (...) {
-        log_error("Dll:InitFailed", lk_s("dll", DllName), lk_i("offset", Offset));
-        // printf("Filed loading DllOffset %s:%d", DllName, Offset);
-    }
-
-    return 0;
+    HMODULE hMod = GetModuleHandle(DllName);
+    if (!hMod) hMod = LoadLibrary(DllName);
+    if (!hMod) return 0;
+    if (Offset < 0) return (DWORD)GetProcAddress(hMod, (LPCSTR)(-Offset));
+    return ((DWORD)hMod) + Offset;
 }
 
 DWORD GetDllOffset(int num) {

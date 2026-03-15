@@ -25,6 +25,24 @@ echo "GIT_HASH:    $GIT_HASH"
     -static-libgcc -static-libstdc++ \
     -Wl,-Bstatic -lpthread -Wl,-Bdynamic
 
+# Patch PE header: set SizeOfStackReserve and SizeOfStackCommit to 64 MB each.
+# PD2 init routines can exhaust the default 2 MB reserve under Wine wow64.
+python3 - <<'PYEOF'
+import struct, sys
+path = "bin/d2-map.exe"
+STACK_SIZE = 64 * 1024 * 1024  # 64 MB
+with open(path, "r+b") as f:
+    f.seek(0x3C)
+    pe_off = struct.unpack("<I", f.read(4))[0]
+    # Optional header starts at pe_off + 4 (sig) + 20 (COFF) = pe_off + 24
+    opt_off = pe_off + 24
+    f.seek(opt_off + 0x48)  # SizeOfStackReserve
+    f.write(struct.pack("<I", STACK_SIZE))
+    f.seek(opt_off + 0x4C)  # SizeOfStackCommit
+    f.write(struct.pack("<I", STACK_SIZE))
+print(f"Patched PE stack: reserve+commit = {STACK_SIZE // 1024 // 1024} MB")
+PYEOF
+
 # Bundle the mingw pthread DLL alongside the exe so Wine can find it
 PTHREAD_DLL=$("$COMPILER" -print-file-name=libwinpthread-1.dll 2>/dev/null || true)
 if [ -f "$PTHREAD_DLL" ]; then

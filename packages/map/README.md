@@ -107,14 +107,27 @@ or
 
 ---
 
-### Arch Linux (Steam / Diablo II Resurrected)
+### Arch Linux (Steam / classic Diablo II)
+
+> **Important:** This tool requires **classic Diablo II v1.13c or v1.14d** (with `Game.exe`
+> and the legacy DLLs). **Diablo II Resurrected is NOT supported.**
+> To obtain classic D2:
+> - **Steam** — buy/install "Diablo II" (App ID 47890), separate from D2R
+> - **GOG** — download the GOG release
+> - **Battle.net** — install via the Battle.net desktop app (works with Wine/Bottles)
 
 #### Steam install path
 
-When installed via Steam on Linux, Diablo II Resurrected data files are located at:
+When installed via Steam, classic Diablo II is located at:
 
 ```
-~/.steam/steam/steamapps/common/Diablo II Resurrected/
+~/.steam/steam/steamapps/common/Diablo II/
+```
+
+Confirm the installation with:
+
+```bash
+ls "$HOME/.steam/steam/steamapps/common/Diablo II/Game.exe"
 ```
 
 #### Dependency check
@@ -161,7 +174,7 @@ sudo usermod -aG docker $USER
 #### Building from the Docker image (recommended)
 
 ```bash
-D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II"
 
 docker pull blacha/diablo2
 docker run -it -v "$D2_PATH":/app/game docker.io/blacha/diablo2:latest /bin/bash
@@ -175,7 +188,7 @@ The wine command should generate the JSON for one level to confirm everything wo
 #### Building from source (Arch Linux)
 
 ```bash
-D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II"
 
 # From the repository root:
 yarn install
@@ -234,7 +247,7 @@ You can try using different seeds, levels and difficulties this way if you like.
 
 #### Arch Linux (Steam)
 ```bash
-D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II"
 
 docker run -v "$D2_PATH":/app/game -p 8899:8899 diablo2/map
 ```

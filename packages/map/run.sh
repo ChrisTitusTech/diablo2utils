@@ -6,13 +6,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=.env
 [ -f "$SCRIPT_DIR/.env" ] && source "$SCRIPT_DIR/.env"
 
-# Default to Steam install path for Diablo II Resurrected on Linux.
-# Override by setting D2_PATH in your environment before running this script.
-D2_PATH="${D2_PATH:-$HOME/.steam/steam/steamapps/common/Diablo II Resurrected}"
+# Classic Diablo II v1.13c DLLs are bundled in assets/d2/ inside this repo.
+# Override D2_PATH in .env or your environment if needed.
+# MPQ game data files must also be present (symlinked by install.sh).
+D2_PATH="${D2_PATH:-$SCRIPT_DIR/../../assets/d2}"
 
-if [ ! -d "$D2_PATH" ]; then
-    echo "ERROR: Diablo II Resurrected not found at: $D2_PATH"
-    echo "Set the D2_PATH environment variable to your installation directory."
+if [ ! -f "$D2_PATH/Game.exe" ]; then
+    echo "ERROR: Game.exe not found at: $D2_PATH"
+    echo ""
+    echo "Run install.sh first — it sets up the assets/d2 directory."
     exit 1
 fi
 
