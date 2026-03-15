@@ -18,7 +18,7 @@ export class MapImageRoute implements Route {
 
     const canvas = NodeCanvas.createCanvas(zone.size.width, zone.size.height + 32);
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
 
     ctx.fillStyle = 'black';
     ctx.fillRect(0, 0, zone.size.width, zone.size.height);

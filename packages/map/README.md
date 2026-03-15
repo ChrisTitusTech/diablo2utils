@@ -105,7 +105,98 @@ This Map generation client can be used with
 or 
 - Diablo 2 LOD 1.13c 
 
-### Building from docker image
+---
+
+### Arch Linux (Steam / Diablo II Resurrected)
+
+#### Steam install path
+
+When installed via Steam on Linux, Diablo II Resurrected data files are located at:
+
+```
+~/.steam/steam/steamapps/common/Diablo II Resurrected/
+```
+
+#### Dependency check
+
+Run the following to verify all required packages are present before building:
+
+```bash
+# Required packages
+deps=(docker wine lib32-glibc nodejs yarn mingw-w64-gcc)
+
+echo "=== Checking map package dependencies ==="
+missing=()
+for dep in "${deps[@]}"; do
+    if pacman -Qi "$dep" &>/dev/null; then
+        echo "  [OK]  $dep"
+    else
+        echo "  [MISSING]  $dep"
+        missing+=("$dep")
+    fi
+done
+
+if [ ${#missing[@]} -gt 0 ]; then
+    echo ""
+    echo "Install missing packages with:"
+    echo "  sudo pacman -S ${missing[*]}"
+    echo ""
+    echo "Note: 'yarn' may not be in the official repos; install via npm if needed:"
+    echo "  sudo npm install -g yarn"
+else
+    echo ""
+    echo "All dependencies satisfied."
+fi
+```
+
+Also ensure the Docker service is running:
+
+```bash
+sudo systemctl enable --now docker
+# Add your user to the docker group to avoid using sudo:
+sudo usermod -aG docker $USER
+# Log out and back in, or run: newgrp docker
+```
+
+#### Building from the Docker image (recommended)
+
+```bash
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+
+docker pull blacha/diablo2
+docker run -it -v "$D2_PATH":/app/game docker.io/blacha/diablo2:latest /bin/bash
+wine regedit /app/d2.install.reg
+wine bin/d2-map.exe game --seed 10 --map 1 --difficulty 0
+exit
+```
+
+The wine command should generate the JSON for one level to confirm everything works.
+
+#### Building from source (Arch Linux)
+
+```bash
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+
+# From the repository root:
+yarn install
+yarn build
+cd packages/map
+yarn bundle-server
+yarn bundle-www
+cp -r static dist/www
+docker build . -t diablo2/map
+docker run -it -v "$D2_PATH":/app/game diablo2/map /bin/bash
+wine regedit /app/d2.install.reg
+wine bin/d2-map.exe game --seed 10 --map 1 --difficulty 0
+exit
+```
+
+The wine command should generate the JSON for one level to confirm everything works.
+You can try using different seeds, levels, and difficulties this way if you like.
+
+---
+
+### Building from docker image (Windows / generic)
 
 This is the easiest method to get working:
 
@@ -118,7 +209,7 @@ wine bin/d2-map.exe game --seed 10 --map 1 --difficulty 0
 The last wine command should generate the JSON for one level, this is to test that it works.
 
 
-### Building from source (windows)
+### Building from source (Windows)
 From the source code folder:
 Remember to change "/E/Games/Diablo II" in the below commands to your D2 installation folder.
 
@@ -140,7 +231,19 @@ You can try using different seeds, levels and difficulties this way if you like.
 
 
 ### Starting the server
-Now you run this server so you can send requests for seeds/difficulties to generate all the maps for that given seed:
+
+#### Arch Linux (Steam)
+```bash
+D2_PATH="$HOME/.steam/steam/steamapps/common/Diablo II Resurrected"
+
+docker run -v "$D2_PATH":/app/game -p 8899:8899 diablo2/map
+```
+or using the public Docker image:
+```bash
+docker run -v "$D2_PATH":/app/game -p 8899:8899 docker.io/blacha/diablo2:latest
+```
+
+#### Windows / generic
 ```bash
 docker run -v "/E/Games/Diablo II":/app/game -p 8899:8899 diablo2/map
 ```
