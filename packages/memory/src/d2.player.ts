@@ -89,7 +89,8 @@ export class Diablo2Player {
       // Validate: difficulty must be 0 (Normal), 1 (Nightmare), or 2 (Hell).
       // D2R patches can shift struct offsets, producing garbage values.
       if (actMisc.difficulty >= 0 && actMisc.difficulty <= 2) return actMisc.difficulty;
-      logger.warn({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
+
+      logger.info({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
     } else {
       logger.error({ offset: toHex(act.pActMisc.offset) }, 'Player:OffsetInvalid:Difficulty');
     }

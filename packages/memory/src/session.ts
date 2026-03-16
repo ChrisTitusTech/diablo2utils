@@ -101,7 +101,7 @@ export class Diablo2GameSessionMemory {
     // Track map information
     if (mapSeed !== 0 && mapSeed !== this.state.map.id) {
       this.state.map.id = mapSeed;
-      this.state.map.difficulty = resolveDifficulty(actMisc, act, logger);
+      this.state.map.difficulty = await resolveDifficulty(this.d2, actMisc, act, logger);
       this.state.log.info({ map: this.state.map }, 'MapSeed:Changed');
       this.state.units.clear();
       this.state.items.clear();
@@ -204,14 +204,15 @@ function getShiftedStat(stats: Map<Attribute, number>, stat: Attribute, shift: n
   return value >> shift;
 }
 
-function resolveDifficulty(
+async function resolveDifficulty(
+  d2: Diablo2Process,
   actMisc: { difficulty: number } | null,
   act: ActS,
   logger: LogType,
-): Difficulty {
+): Promise<Difficulty> {
   if (actMisc && actMisc.difficulty >= 0 && actMisc.difficulty <= 2) return actMisc.difficulty;
 
-  if (actMisc) logger.warn({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
+  if (actMisc) logger.info({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
   else logger.error({ offset: toHex(act.pActMisc.offset) }, 'Player:OffsetInvalid:Difficulty');
 
   if (process.argv.includes('--nightmare')) return Difficulty.Nightmare;
