@@ -160,8 +160,8 @@ async function main(): Promise<void> {
     });
   };
 
-  // Push full game state (player position, units, items) to the map server
-  // on every state change so the viewer can track the player in real time.
+  // Push a minimal game state to the map server: player location, map seed,
+  // and rune drops only.
   let statePostInFlight = false;
   session.state.onChange = (): void => {
     if (statePostInFlight) return; // skip if a POST is still pending
@@ -170,10 +170,19 @@ async function main(): Promise<void> {
       seed: json.map.id,
       difficulty: json.map.difficulty,
       act: json.map.act,
-      player: json.player,
-      units: json.units,
-      items: json.items,
-      kills: json.kills,
+      player: {
+        x: json.player.x,
+        y: json.player.y,
+        name: json.player.name,
+      },
+      items: json.items.map((item) => ({
+        id: item.id,
+        type: item.type,
+        name: item.name,
+        code: item.code,
+        x: item.x,
+        y: item.y,
+      })),
     };
     statePostInFlight = true;
     httpPostJson(`${mapServerUrl}/v1/state`, payload)

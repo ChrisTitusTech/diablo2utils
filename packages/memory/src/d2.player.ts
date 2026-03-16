@@ -14,7 +14,7 @@ function isValidPointer(p: number): boolean {
   return true;
 }
 
-const TrackUnitTypes = new Set([UnitType.Item, UnitType.NPC]);
+const TrackUnitTypes = new Set([UnitType.Item]);
 
 export class Diablo2Player {
   d2: Diablo2Process;

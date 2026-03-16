@@ -41,13 +41,72 @@ export WINEPREFIX="${WINEPREFIX:-$HOME/.local/share/d2map/.prefix}"
 export PORT="${PORT:-8899}"
 export MAP_SERVER_URL="${MAP_SERVER_URL:-http://localhost:$PORT}"
 
+find_port_pids() {
+    if command -v lsof >/dev/null 2>&1; then
+        lsof -tiTCP:"$PORT" -sTCP:LISTEN 2>/dev/null || true
+    elif command -v fuser >/dev/null 2>&1; then
+        fuser -n tcp "$PORT" 2>/dev/null | tr ' ' '\n' || true
+    else
+        return 0
+    fi
+}
+
+wait_for_port_free() {
+    local attempts="${1:-30}"
+    local pids
+
+    for _ in $(seq 1 "$attempts"); do
+        pids="$(find_port_pids)"
+        if [ -z "$pids" ]; then
+            return 0
+        fi
+        sleep 1
+    done
+
+    return 1
+}
+
+kill_stale_processes() {
+    local port_pids
+    local patterns=(
+        "node $SCRIPT_DIR/dist/index.cjs"
+        "node packages/memory/build/cli.js"
+        "$SCRIPT_DIR/bin/d2-map.exe"
+        "./bin/d2-map.exe"
+    )
+
+    echo "=== Cleaning up old map processes ==="
+
+    port_pids="$(find_port_pids)"
+    if [ -n "$port_pids" ]; then
+        echo "Killing processes listening on port $PORT: $port_pids"
+        echo "$port_pids" | xargs -r kill 2>/dev/null || true
+        sleep 1
+        if port_pids="$(find_port_pids)"; [ -n "$port_pids" ]; then
+            echo "Force killing remaining port $PORT listeners: $port_pids"
+            echo "$port_pids" | xargs -r kill -9 2>/dev/null || true
+        fi
+    fi
+
+    for pattern in "${patterns[@]}"; do
+        pkill -f "$pattern" 2>/dev/null || true
+    done
+
+    if ! wait_for_port_free 15; then
+        echo "ERROR: Port $PORT is still in use after cleanup."
+        exit 1
+    fi
+}
+
 # --- Start map server in background ---
 echo "=== Starting map server on http://localhost:$PORT ==="
 
 MAP_SERVER_PID=""
+MEMORY_READER_PID=""
 cleanup() {
     echo ""
     echo "Shutting down..."
+    [ -n "$MEMORY_READER_PID" ] && kill "$MEMORY_READER_PID" 2>/dev/null || true
     [ -n "$MAP_SERVER_PID" ] && kill "$MAP_SERVER_PID" 2>/dev/null
     # Kill any leftover child processes
     jobs -p | xargs -r kill 2>/dev/null
@@ -55,6 +114,8 @@ cleanup() {
     echo "Done."
 }
 trap cleanup EXIT INT TERM
+
+kill_stale_processes
 
 # The map server needs to run from dist/ with /app/game symlink
 (
@@ -103,6 +164,8 @@ echo "  Map server:  http://localhost:$PORT"
 echo "  Map viewer:  http://localhost:$PORT  (open in browser)"
 echo ""
 
-# Run the memory reader in the foreground
+# Run the memory reader while keeping this script alive so cleanup still runs.
 cd "$REPO_ROOT"
-exec node packages/memory/build/cli.js "$PLAYER_NAME"
+node packages/memory/build/cli.js "$PLAYER_NAME" "$@" &
+MEMORY_READER_PID=$!
+wait "$MEMORY_READER_PID"
