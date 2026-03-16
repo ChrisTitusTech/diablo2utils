@@ -2,6 +2,11 @@ import { Bounds } from './bounds';
 import { Diablo2Level } from '@diablo2/data';
 import { MapParams } from './tile';
 
+type RenderContext2D = {
+  fillStyle: unknown;
+  fillRect(x: number, y: number, width: number, height: number): void;
+};
+
 function isInBounds(pt: { x: number; y: number }, bounds: Bounds): boolean {
   if (pt.x < bounds.x) return false;
   if (pt.y < bounds.y) return false;
@@ -15,7 +20,7 @@ export class LevelRender {
 
   static render(
     level: Diablo2Level,
-    ctx: CanvasRenderingContext2D,
+    ctx: RenderContext2D,
     bounds: Bounds,
     scale = 0.5,
     mapParams?: MapParams,
@@ -51,7 +56,7 @@ export class LevelRender {
     }
   }
 
-  static renderObjects(zone: Diablo2Level, ctx: CanvasRenderingContext2D, bounds: Bounds, scale = 0.5): void {
+  static renderObjects(zone: Diablo2Level, ctx: RenderContext2D, bounds: Bounds, scale = 0.5): void {
     const size = LevelRender.ExitSize * scale;
     const halfSize = size / 2;
     for (const obj of zone.objects) {

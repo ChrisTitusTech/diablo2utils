@@ -18,6 +18,7 @@
         "noFallthroughCasesInSwitch": false,
         "inlineSourceMap": true,
         "inlineSources": true,
+        "skipLibCheck": true,
         "noEmitOnError": false,
         "experimentalDecorators": true,
         "strictPropertyInitialization": false,

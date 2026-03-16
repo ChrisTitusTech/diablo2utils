@@ -24,6 +24,7 @@ export class Process {
   /** Find a pid from a process name */
   static async findPidByName(name: string): Promise<number | null> {
     const files = await fs.readdir('/proc');
+    const cmdlineCandidates: { pid: number; score: number }[] = [];
 
     for (const file of files) {
       const pid = Number(file);
@@ -47,14 +48,38 @@ export class Process {
       if (isNaN(pid)) continue;
 
       try {
-        const data = await fs.readFile(`/proc/${file}/cmdline`);
-        // cmdline fields are NUL-separated; argv[0] is the executable
-        const argv0 = data.toString().split('\0')[0];
-        if (argv0.includes(name)) return pid;
+        const [status, data] = await Promise.all([
+          fs.readFile(`/proc/${file}/status`),
+          fs.readFile(`/proc/${file}/cmdline`),
+        ]);
+
+        const argv = data.toString().split('\0').filter(Boolean);
+        if (argv.length === 0) continue;
+
+        const joined = argv.join(' ');
+        if (!joined.includes(name)) continue;
+
+        // cmdline fields are NUL-separated; argv[0] is the executable.
+        // Prefer the actual Wine/Proton child process over wrappers like
+        // gamescope, pressure-vessel, or the proton launcher itself.
+        const argv0 = argv[0];
+        const statusName = status.toString().split('\n')[0]?.split('\t')[1] ?? '';
+        const score =
+          (/([^\\/]+)$/.exec(argv0)?.[1]?.toLowerCase() === name.toLowerCase() ? 100 : 0) +
+          (statusName === 'Main' ? 50 : 0) +
+          (/^Z:\\.*D2R\.exe$/i.test(argv0) ? 25 : 0) +
+          (joined.includes('Diablo II Resurrected') ? 10 : 0) -
+          (joined.includes('proton waitforexitandrun') ? 25 : 0) -
+          (joined.includes('gamescope') ? 50 : 0);
+
+        cmdlineCandidates.push({ pid, score });
       } catch (e) {
         // noop
       }
     }
+
+    cmdlineCandidates.sort((a, b) => b.score - a.score || a.pid - b.pid);
+    if (cmdlineCandidates.length > 0) return cmdlineCandidates[0].pid;
     return null;
   }
 
