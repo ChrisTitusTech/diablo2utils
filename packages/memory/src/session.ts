@@ -5,9 +5,14 @@ import { Diablo2ItemJson } from 'packages/state/build/json.js';
 import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
-import { ActS, D2rActMiscStrut } from './struts/d2r.act.js';
+import { ActMiscS, ActS, D2rActMiscStrut } from './struts/d2r.act.js';
 
 const sleep = (dur: number): Promise<void> => new Promise((r) => setTimeout(r, dur));
+const UINT32_MOD = 0x1_0000_0000n;
+const UINT32_MASK = 0xffff_ffffn;
+const SEED_MAGIC = 0x6ac6_90c5n;
+const SEED_MAGIC_INVERSE = 0x8a3e_6e0dn;
+const SEED_OFFSET = 666n;
 
 export class Diablo2GameSessionMemory {
   state: Diablo2State;
@@ -89,7 +94,7 @@ export class Diablo2GameSessionMemory {
     const actMisc = act.pActMisc.isValid
       ? await obj.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut)
       : null;
-    const mapSeed = actMisc?.mapSeed ?? 0;
+    const mapSeed = resolveMapSeed(act, actMisc, logger);
 
     this.state.map.act = player.actId;
 
@@ -216,6 +221,61 @@ function resolveDifficulty(
 
 function isRuneCode(code: string): boolean {
   return /^r\d\d$/.test(code);
+}
+
+function resolveMapSeed(act: ActS, actMisc: ActMiscS | null, logger: LogType): number {
+  const derivedSeed = actMisc == null ? null : deriveMapSeed(actMisc.initSeedHash, actMisc.endSeedHash);
+
+  if (derivedSeed != null) {
+    if (act.mapSeed !== 0 && act.mapSeed !== derivedSeed) {
+      logger.warn(
+        {
+          actMapSeed: act.mapSeed,
+          derivedMapSeed: derivedSeed,
+          initSeedHash: `0x${actMisc!.initSeedHash.toString(16)}`,
+          endSeedHash: `0x${actMisc!.endSeedHash.toString(16)}`,
+        },
+        'MapSeed:DerivedMismatch',
+      );
+    }
+
+    return derivedSeed;
+  }
+
+  if (act.mapSeed !== 0) return act.mapSeed;
+
+  if (actMisc != null && actMisc.endSeedHash !== 0) {
+    logger.warn(
+      {
+        initSeedHash: `0x${actMisc.initSeedHash.toString(16)}`,
+        endSeedHash: `0x${actMisc.endSeedHash.toString(16)}`,
+      },
+      'MapSeed:DerivedInvalid',
+    );
+  }
+
+  return 0;
+}
+
+function deriveMapSeed(initSeedHash: bigint | number, endSeedHash: number): number | null {
+  if (endSeedHash === 0) return null;
+
+  const initSeedHash32 = toUint32(initSeedHash);
+  const recoveredSeed = Number((normalizeUint32(BigInt(endSeedHash) - SEED_OFFSET) * SEED_MAGIC_INVERSE) & UINT32_MASK);
+  const gameSeedXor = (initSeedHash32 ^ recoveredSeed) >>> 0;
+  const verifiedSeed = (initSeedHash32 ^ gameSeedXor) >>> 0;
+  const verifiedEndSeedHash = (Math.imul(verifiedSeed, Number(SEED_MAGIC)) + Number(SEED_OFFSET)) >>> 0;
+
+  if (verifiedEndSeedHash !== (endSeedHash >>> 0)) return null;
+  return verifiedSeed;
+}
+
+function normalizeUint32(value: bigint): bigint {
+  return ((value % UINT32_MOD) + UINT32_MOD) & UINT32_MASK;
+}
+
+function toUint32(value: bigint | number): number {
+  return typeof value === 'bigint' ? Number(value & UINT32_MASK) >>> 0 : value >>> 0;
 }
 
 export function dumpStats(stats: Map<Attribute, number>): void {
