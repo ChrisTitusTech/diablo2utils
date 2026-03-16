@@ -8,6 +8,7 @@ test-data
 *.ndjson
 package-lock.json
 yarn-error.log
+tmp/
 # Diablo II MPQ game-data files — too large for git, symlinked by install.sh
 assets/d2/*.mpq
 assets/d2/*.MPQ

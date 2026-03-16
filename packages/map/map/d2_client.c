@@ -30,6 +30,9 @@ char D2_DIR[MAX_PATH] = "";
 CHAR *DIABLO_2 = (CHAR *)"Diablo II";
 CHAR *DIABLO_2_VERSION = (CHAR *)"v1.xy";
 
+CHAR *PATH_OF_DIABLO = "Path of Diablo";
+CHAR *PROJECT_DIABLO = "ProjectD2";
+
 DWORD D2ClientInterface(VOID) {
     return D2Client.dwInit;
 }
@@ -41,7 +44,24 @@ VOID __stdcall ExceptionHandler(VOID) {
 
 D2Version gameVersion = VersionUnknown;
 
-void d2_game_init_vanilla() {
+/** If this value changes, update __asm JMP */
+int D2CLIENT_Pod_InitGameMisc_I_P = 0x6faf559b;
+void /* __declspec(naked) */ D2CLIENT_Pod_InitGameMisc() {
+    __asm(
+        "MOVL %EBP, %ESP\n"
+        "POPL %EBP\n"
+        ".intel_syntax noprefix\n"
+        "PUSH ECX\n"
+        "PUSH EBP\n"
+        "PUSH ESI\n"
+        "PUSH EDI\n"
+        ".att_syntax prefix\n"
+        "JMP 0x6faf559b\n"  // Magic Jump
+        "PUSHL %EBP\n");
+}
+
+// bool isPathOfDiablo = false;
+void d2_game_init_pod() {
     *p_STORM_Pod_MPQHashTable = (DWORD)NULL;
     D2Client.dwInit = 1;
     D2Client.fpInit = (DWORD)D2ClientInterface;
@@ -58,21 +78,110 @@ void d2_game_init_vanilla() {
     log_debug("Init:Dll:Done", lk_s("dll", "Fog.dll"));
 
     log_trace("Init:Dll", lk_s("dll", "D2Win.dll"));
-    if (!D2WIN_10086() || !D2WIN_10005((DWORD)NULL, (DWORD)NULL, (DWORD)NULL, &D2Client)) {
+    if (!D2WIN_10174() || !D2WIN_10072((DWORD)NULL, (DWORD)NULL, (DWORD)NULL, &D2Client)) {
         log_error("Init:Dll:Failed", lk_s("dll", "D2Win.dll"));
         ExitProcess(1);
     }
     log_debug("Init:Dll:Done", lk_s("dll", "D2Win.dll"));
 
     log_trace("Init:Dll", lk_s("dll", "D2Lang.dll"));
-    log_debug("Init:Step:D2LANG_10008");
-    D2LANG_10008(0, "ENG", 0);
+    D2LANG_10009(0, "ENG", 0);
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Lang.dll"));
+
+    log_trace("Init:Dll", lk_s("dll", "D2Client.dll"));
+    D2COMMON_Pod_InitDataTables(0, 0, 0);
+    D2CLIENT_Pod_InitGameMisc();
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Client.dll"));
+}
+
+int D2CLIENT_Pd2_InitGameMisc_I_P = 0x6faf454b;
+void /* __declspec(naked) */ D2CLIENT_Pd2_InitGameMisc() {
+    __asm(
+        "MOVL %EBP, %ESP\n"
+        "POPL %EBP\n"
+        ".intel_syntax noprefix\n"
+        "PUSH ECX\n"
+        "PUSH EBP\n"
+        "PUSH ESI\n"
+        "PUSH EDI\n"
+        ".att_syntax prefix\n"
+        "JMP 0x6faf454b\n"  // Magic Jump
+        "PUSHL %EBP\n");
+}
+bool isProjectDiablo2 = false;
+void d2_game_init_pd2() {
+    *p_STORM_Pd2_MPQHashTable = (DWORD)NULL;
+    D2Client.dwInit = 1;
+    D2Client.fpInit = (DWORD)D2ClientInterface;
+
+    log_trace("Init:Dll", lk_s("dll", "Fog.dll"));
+    FOG_10021("D2");
+    FOG_10019(DIABLO_2, (DWORD)ExceptionHandler, DIABLO_2_VERSION, 1);
+    FOG_10101(1, 0);
+    FOG_10089(1);
+
+    if (!FOG_10218()) {
+        log_error("Init:Dll:Failed", lk_s("dll", "Fog.dll"));
+        ExitProcess(1);
+    }
+    log_debug("Init:Dll:Done", lk_s("dll", "Fog.dll"));
+
+    log_trace("Init:Dll", lk_s("dll", "D2Win.dll"));
+    if (!D2WIN_10086() || !D2WIN_10005((DWORD)NULL, (DWORD)NULL, (DWORD)NULL, &D2Client)) {
+        log_error("InitFailed", lk_s("dll", "D2Win.dll"));
+        ExitProcess(1);
+    }
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Win.dll"));
+
+    // D2Lang init not needed for map generation (crashes with vanilla args)
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Lang.dll"));
+
+    log_trace("Init:Dll", lk_s("dll", "D2Client.dll"));
+    D2COMMON_Pd2_InitDataTables(0, 0, 0);
+    // D2CLIENT_Pd2_InitGameMisc() is PD2-specific address; skip for vanilla
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Client.dll"));
+}
+
+void d2_game_init_vanilla() {
+    // Vanilla 1.13d init:
+    // D2Win: uses ordinals 10174 + 10072 (same as PoD; 10086/10005 fail with vanilla)
+    // D2Lang: skipped  (not required for map generation)
+    // D2Common: ordinal 10943 exists in vanilla (same as Pd2_InitDataTables)
+    // D2Client: skipped (no known-good RVA; not required for map generation)
+    *p_STORM_Pod_MPQHashTable = (DWORD)NULL;
+    D2Client.dwInit = 1;
+    D2Client.fpInit = (DWORD)D2ClientInterface;
+
+    log_trace("Init:Dll", lk_s("dll", "Fog.dll"));
+    FOG_10021("D2");
+    FOG_10019(DIABLO_2, (DWORD)ExceptionHandler, DIABLO_2_VERSION, 1);
+    FOG_10101(1, 0);
+    FOG_10089(1);
+    if (!FOG_10218()) {
+        log_error("Init:Dll:Failed", lk_s("dll", "Fog.dll"));
+        ExitProcess(1);
+    }
+    log_debug("Init:Dll:Done", lk_s("dll", "Fog.dll"));
+
+    // D2Win: try PoD ordinals (10174 + 10072), continue if they fail
+    log_trace("Init:Dll", lk_s("dll", "D2Win.dll"));
+    DWORD d2win_a = D2WIN_10174();
+    log_debug("Init:Dll:Result", lk_s("dll", "D2Win.dll"), lk_i("10174", d2win_a));
+    if (d2win_a) {
+        DWORD d2win_b = D2WIN_10072((DWORD)NULL, (DWORD)NULL, (DWORD)NULL, &D2Client);
+        log_debug("Init:Dll:Result", lk_s("dll", "D2Win.dll"), lk_i("10072", d2win_b));
+    }
+    log_debug("Init:Dll:Done", lk_s("dll", "D2Win.dll"));
+
+    // D2Lang: same ordinal as PoD (10009) — needed by D2Common for string tables
+    log_trace("Init:Dll", lk_s("dll", "D2Lang.dll"));
+    D2LANG_10009(0, "ENG", 0);
     log_debug("Init:Dll:Done", lk_s("dll", "D2Lang.dll"));
 
     log_trace("Init:Dll", lk_s("dll", "D2Common.dll"));
-    log_debug("Init:Step:D2COMMON_10081");
-    D2COMMON_Pod_InitDataTables(0, 0, 0);
+    D2COMMON_10081(0, 0, 0);  // ordinal 10081 = InitDataTables (vanilla 1.13d, same as PoD)
     log_debug("Init:Dll:Done", lk_s("dll", "D2Common.dll"));
+    // D2Client::InitGameMisc skipped: address unknown for vanilla; not required for map gen
 }
 
 void d2_game_init(char *folderName) {
@@ -116,7 +225,16 @@ void d2_game_init(char *folderName) {
     DefineOffsets();
     log_debug("Init:Offsets:Defined");
 
-    d2_game_init_vanilla();
+    if (gameVersion == VersionPathOfDiablo) {
+        d2_game_init_pod();
+    } else if (gameVersion == VersionProjectDiablo2) {
+        d2_game_init_pd2();
+    } else if (gameVersion == VersionDiablo2) {
+        d2_game_init_vanilla();
+    } else {
+        log_error("Init:Failed:GameInit", lk_s("path", D2_DIR));
+        ExitProcess(1);
+    }
 
     SetCurrentDirectory(folderName);
     return;
@@ -350,6 +468,22 @@ int get_act(int levelCode) {
 int d2_dump_map(int seed, int difficulty, int levelCode) {
     LevelTxt *levelData = d2common_get_level_text(gameVersion, levelCode); 
     if (!levelData) return 1;
+
+    if (gameVersion == VersionPathOfDiablo) {
+        switch (levelCode) {
+            // Why are these levels broken?
+            case 20:
+            case 59:
+            case 63:
+            case 99:
+                return 1;
+        }
+    } else if (gameVersion == VersionProjectDiablo2) {
+        switch(levelCode) {
+            case 150:
+                return 1;
+        }
+    } 
 
     int actId = get_act(levelCode);
     Act *pAct = d2common_load_act(gameVersion, actId, seed, difficulty); 

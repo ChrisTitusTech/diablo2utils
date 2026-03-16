@@ -50,7 +50,8 @@ FUNCPTR(FOG, 10101, DWORD __fastcall, (DWORD _1, DWORD _2), -10101)
 FUNCPTR(FOG, 10089, DWORD __fastcall, (DWORD _1), -10089)
 FUNCPTR(FOG, 10218, DWORD __fastcall, (VOID), -10218)
 
-// Vanilla 1.13c offsets
+// Path of diablo specific
+FUNCPTR(D2CLIENT, Pod_InitGameMisc_I, VOID __stdcall, (DWORD Dummy1, DWORD Dummy2, DWORD Dummy3), 0x4454B)
 VARPTR(STORM, Pod_MPQHashTable, DWORD, 0x52A60)
 ASMPTR(D2CLIENT, Pod_LoadAct_1, 0x737F0)
 ASMPTR(D2CLIENT, Pod_LoadAct_2, 0x2B420)
@@ -69,15 +70,45 @@ FUNCPTR(D2COMMON, Pod_GetObjectTxt, ObjectTxt *__stdcall, (DWORD objno), 0x1ADC0
 
 
 FUNCPTR(D2COMMON, 10081, DWORD __stdcall, (DWORD _1, DWORD _2, DWORD _3), -10081)
+FUNCPTR(D2LANG, 10009, DWORD __fastcall, (DWORD _1, CHAR *_2, DWORD _3), -10009)
+FUNCPTR(D2WIN, 10174, DWORD __fastcall, (VOID), -10174)
+FUNCPTR(D2WIN, 10072, DWORD __fastcall, (DWORD _1, DWORD _2, DWORD _3, d2client_struct *pD2Client), -10072) 
 
-// Vanilla 1.13c ordinals
+// Project Diablo 2 Specific / v1.13c
+FUNCPTR(D2CLIENT, Pd2_InitGameMisc_I, VOID __stdcall, (DWORD Dummy1, DWORD Dummy2, DWORD Dummy3), 0x4454B)
+VARPTR(STORM, Pd2_MPQHashTable, DWORD, 0x53120)
+ASMPTR(D2CLIENT, Pd2_LoadAct_1, 0x62AA0)
+ASMPTR(D2CLIENT, Pd2_LoadAct_2, 0x62760)
+
+FUNCPTR(D2COMMON, Pd2_AddRoomData, void __stdcall, (Act * ptAct, int LevelId, int Xpos, int Ypos, Room1 *pRoom), -10401)
+FUNCPTR(D2COMMON, Pd2_RemoveRoomData, void __stdcall, (Act * ptAct, int LevelId, int Xpos, int Ypos, Room1 *pRoom), -11099)
+FUNCPTR(D2COMMON, Pd2_GetLevel, Level *__fastcall, (ActMisc * pMisc, DWORD dwLevelNo), -10207)
+FUNCPTR(D2COMMON, Pd2_InitLevel, void __stdcall, (Level * pLevel), -10322)
+FUNCPTR(D2COMMON, Pd2_LoadAct, Act *__stdcall, (DWORD ActNumber, DWORD MapId, DWORD Unk, DWORD Unk_2, DWORD Unk_3, DWORD Unk_4, DWORD TownLevelId, DWORD Func_1, DWORD Func_2), 0x3CB30)
+FUNCPTR(D2COMMON, Pd2_UnloadAct, VOID __stdcall, (Act * pAct), -10868)
+
+FUNCPTR(D2COMMON, Pd2_GetLevelText, LevelTxt *__stdcall, (DWORD levelno), -10014)
+FUNCPTR(D2COMMON, Pd2_GetObjectTxt, ObjectTxt *__stdcall, (DWORD objno), -10688)
+FUNCPTR(D2COMMON, Pd2_InitDataTables, DWORD __stdcall, (DWORD _1, DWORD _2, DWORD _3), -10943)  //  1.13d
+
+
 FUNCPTR(D2WIN, 10086, DWORD __fastcall, (VOID), -10086)
 FUNCPTR(D2WIN, 10005, DWORD __fastcall, (DWORD _1, DWORD _2, DWORD _3, d2client_struct *pD2Client), -10005)
 FUNCPTR(D2LANG, 10008, DWORD __fastcall, (DWORD _1, CHAR *_2, DWORD _3), -10008)
 FUNCPTR(D2COMMON, 10943, DWORD __stdcall, (DWORD _1, DWORD _2, DWORD _3), -10943)
 
+// Vanilla 1.13c D2Client LoadAct callbacks (exported ordinals 10001/10002)
+ASMPTR(D2CLIENT, Vanilla_LoadAct_1, -10001)  // RVA 0x62e20
+ASMPTR(D2CLIENT, Vanilla_LoadAct_2, -10002)  // RVA 0x62de0
+
+// Pod => PD2
+// InitA D2Lang.10009   -> D2Lang.10008
+// InitA D2Win.10174    -> D2Win.10086
+// InitB D2WIN.10072    -> D2WIN.10005
+//
+
 #define _D2PTRS_START FOG_10021
-#define _D2PTRS_END D2COMMON_10943
+#define _D2PTRS_END D2CLIENT_Vanilla_LoadAct_2
 
 // #ifdef _DEFINE_VARS
 // #else

@@ -7,13 +7,19 @@
 
 enum D2Version {
     VersionUnknown,
-    VersionDiablo2
+    VersionDiablo2,
+    VersionPathOfDiablo,
+    VersionProjectDiablo2
 };
 
-CHAR* Path_Diablo2 = (CHAR*)""; // vanilla 1.13c — no subdirectory
+CHAR* Path_PathOfDiablo = (CHAR*)"Path of Diablo/";
+CHAR* Path_ProjectDiablo2 = (CHAR*)"ProjectD2/";
+CHAR* Path_Diablo2 = (CHAR*)"";
 
 /** Convert the D2Version to the path that the files are normally located in */
 char* game_version_path(D2Version version) {
+    if (version == VersionPathOfDiablo) return Path_PathOfDiablo;
+    if (version == VersionProjectDiablo2) return Path_ProjectDiablo2;
     if (version == VersionDiablo2) return "";
     return NULL;
 }
@@ -33,9 +39,11 @@ bool game_version_exists(char* folderName, D2Version version) {
     return !found;
 }
 
-/** Attempt to determine which version is installed */
+/** Attempt to determine which mod is installed */
 D2Version game_version(char* folderName) {
-    if (game_version_exists(folderName, VersionDiablo2)) return VersionDiablo2;
+    if (game_version_exists(folderName, VersionPathOfDiablo)) return VersionPathOfDiablo;
+    if (game_version_exists(folderName, VersionProjectDiablo2)) return VersionProjectDiablo2;
+    if (game_version_exists(folderName, VersionDiablo2)) return VersionDiablo2; 
     return VersionUnknown;
 }
 #endif
