@@ -9,6 +9,18 @@
 #include "d2_structs.h"
 #include "json.h"
 
+/**
+ * Hard exit without CRT teardown.
+ * D2Common's CRT was only partially initialized (DllMain was corrupted),
+ * so the normal CRT atexit/cleanup path hits infinite recursion and
+ * stack-overflows.  TerminateProcess skips all of that.
+ */
+static void hard_exit(int code) {
+    fflush(stdout);
+    fflush(stderr);
+    TerminateProcess(GetCurrentProcess(), (UINT)code);
+}
+
 #define INPUT_BUFFER 1024
 
 const char COMMAND_EXIT[] = "$exit";
@@ -147,7 +159,7 @@ int main(int argc, char *argv[]) {
         if (argMapId > -1) dump_maps(argSeed, argDifficulty, -1, argMapId);
         else if (argActId > -1) dump_maps(argSeed, argDifficulty, argActId, -1);
         else dump_maps(argSeed, argDifficulty, -1, -1);
-        return 0;
+        hard_exit(0);
     }
 
     /** Init the D2 client using the provided path */
@@ -159,7 +171,7 @@ int main(int argc, char *argv[]) {
     int rtn;
     /** Read in seed/Difficulty then generate all the maps */
     while (fgets(buffer, INPUT_BUFFER, stdin) != NULL) {
-        if (starts_with(buffer, COMMAND_EXIT) == 1) return 0;
+        if (starts_with(buffer, COMMAND_EXIT) == 1) hard_exit(0);
 
         if (starts_with(buffer, COMMAND_MAP) == 1) {
             dump_maps(argSeed, argDifficulty, argActId, argMapId);
@@ -181,7 +193,7 @@ int main(int argc, char *argv[]) {
         printf("\n");
     }
 
-    return 0;
+    hard_exit(0);
 }
 
 

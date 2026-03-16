@@ -38,6 +38,23 @@ export class Process {
         // noop
       }
     }
+
+    // Fallback: search /proc/{pid}/cmdline for the process name.
+    // Under Wine/Proton the process comm name may differ from the executable
+    // (e.g. D2R.exe shows as "Main"), so we check the first argument (argv[0]).
+    for (const file of files) {
+      const pid = Number(file);
+      if (isNaN(pid)) continue;
+
+      try {
+        const data = await fs.readFile(`/proc/${file}/cmdline`);
+        // cmdline fields are NUL-separated; argv[0] is the executable
+        const argv0 = data.toString().split('\0')[0];
+        if (argv0.includes(name)) return pid;
+      } catch (e) {
+        // noop
+      }
+    }
     return null;
   }
 

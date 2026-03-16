@@ -24,6 +24,12 @@ DWORD GetDllOffset(const char *DllName, int Offset) {
     try {
         HMODULE hMod = GetModuleHandle(DllName);
         if (!hMod) hMod = LoadLibrary(DllName);
+        if (!hMod) {
+            /* DLL may have unresolvable imports (e.g. D2Client needs
+               D2MCPClient which we don't ship).  Load as image without
+               resolving imports — exports/ordinals still work. */
+            hMod = LoadLibraryEx(DllName, NULL, DONT_RESOLVE_DLL_REFERENCES);
+        }
         if (!hMod) return 0;
         if (Offset < 0)return (DWORD)GetProcAddress(hMod, (LPCSTR)(-Offset));
         return ((DWORD)hMod) + Offset;

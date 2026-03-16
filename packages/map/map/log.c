@@ -26,6 +26,9 @@ int LogLevel = LOG_DEBUG;
 void log_level(int logLevel) {
     LogLevel = logLevel;
 }
+int log_enabled(int logLevel) {
+    return logLevel >= LogLevel;
+}
 int64_t currentTimeMillis() {
     struct timeval time;
     gettimeofday(&time, NULL);

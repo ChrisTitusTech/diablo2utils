@@ -8,6 +8,7 @@ import { HttpError, Request, Route } from './route.js';
 import { HealthRoute } from './routes/health.js';
 import { MapImageRoute } from './routes/map.image.js';
 import { MapActLevelRoute, MapActRoute, MapRoute } from './routes/map.js';
+import { StateGetRoute, currentGameState } from './routes/state.js';
 
 class Diablo2MapServer {
   server = express.default();
@@ -15,6 +16,7 @@ class Diablo2MapServer {
 
   constructor() {
     this.server.use(cors());
+    this.server.use(express.json());
   }
 
   bind(route: Route): void {
@@ -54,10 +56,35 @@ class Diablo2MapServer {
 
   async init(): Promise<void> {
     this.bind(new HealthRoute());
+    this.bind(new StateGetRoute());
     this.bind(new MapRoute());
     this.bind(new MapActRoute());
     this.bind(new MapActLevelRoute());
     this.bind(new MapImageRoute());
+
+    // POST /v1/state — memory reader pushes game state updates
+    this.server.post('/v1/state', (req: express.Request, res: express.Response) => {
+      const body = req.body;
+      if (body == null || typeof body !== 'object') {
+        res.status(400).json({ message: 'Invalid body' });
+        return;
+      }
+      const seed = Number(body.seed);
+      const difficulty = Number(body.difficulty);
+      const act = Number(body.act);
+
+      if (isNaN(seed) || seed <= 0) {
+        res.status(422).json({ message: 'Invalid seed' });
+        return;
+      }
+      currentGameState.seed = seed;
+      currentGameState.difficulty = isNaN(difficulty) ? currentGameState.difficulty : difficulty;
+      currentGameState.act = isNaN(act) ? currentGameState.act : act;
+      currentGameState.updatedAt = Date.now();
+
+      Log.info({ seed, difficulty, act }, 'State:Updated');
+      res.status(200).json(currentGameState);
+    });
 
     await new Promise<void>((resolve) => {
       this.server.listen(this.port, () => {

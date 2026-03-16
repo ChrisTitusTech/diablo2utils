@@ -47,7 +47,42 @@ export class Diablo2MapViewer {
       this.updateFromUrl();
       this.update();
       this.map.on('render', this.render);
+      this.startStatePolling();
     });
+  }
+
+  /** Poll the map server for game state updates pushed by the memory reader */
+  stateTimer: unknown;
+  lastStateUpdatedAt = 0;
+
+  startStatePolling(): void {
+    const poll = async (): Promise<void> => {
+      try {
+        const res = await fetch('/v1/state');
+        if (!res.ok) return;
+        const state = await res.json();
+        // Only update when the server has a newer state and a valid seed
+        if (state.updatedAt > this.lastStateUpdatedAt && state.seed > 0) {
+          this.lastStateUpdatedAt = state.updatedAt;
+          const map = this.ctx.state.map;
+          const changed =
+            map.id !== state.seed ||
+            map.act !== state.act ||
+            map.difficulty !== state.difficulty;
+          if (changed) {
+            map.id = state.seed;
+            map.act = state.act ?? map.act;
+            map.difficulty = state.difficulty ?? map.difficulty;
+            this.update();
+          }
+        }
+      } catch {
+        // server unreachable — ignore
+      }
+    };
+    this.stateTimer = setInterval(poll, 2000);
+    // Also run immediately so the viewer picks up the current state on load
+    poll();
   }
 
   /**

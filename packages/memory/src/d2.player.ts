@@ -84,15 +84,20 @@ export class Diablo2Player {
   }
 
   async getDifficulty(act: ActS, logger: LogType): Promise<Difficulty> {
-    if (!act.pActMisc.isValid) {
+    if (act.pActMisc.isValid) {
+      const actMisc = await this.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut);
+      // Validate: difficulty must be 0 (Normal), 1 (Nightmare), or 2 (Hell).
+      // D2R patches can shift struct offsets, producing garbage values.
+      if (actMisc.difficulty >= 0 && actMisc.difficulty <= 2) return actMisc.difficulty;
+      logger.warn({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
+    } else {
       logger.error({ offset: toHex(act.pActMisc.offset) }, 'Player:OffsetInvalid:Difficulty');
-      if (process.argv.includes('--nightmare')) return Difficulty.Nightmare;
-      if (process.argv.includes('--normal')) return Difficulty.Normal;
-      return Difficulty.Hell;
     }
 
-    const actMisc = await this.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut);
-    return actMisc.difficulty;
+    // Fallback: honour CLI flags, otherwise default to Hell
+    if (process.argv.includes('--nightmare')) return Difficulty.Nightmare;
+    if (process.argv.includes('--normal')) return Difficulty.Normal;
+    return Difficulty.Hell;
   }
 
   async getRooms(path: PathS, logger: LogType): Promise<RoomS[]> {

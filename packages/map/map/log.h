@@ -30,6 +30,8 @@ struct log_obj *lk_b(const char *key, bool value);
 
 /** Set the current logging level */
 void log_level(int logLevel);
+/** Check if a given log level would be printed */
+int log_enabled(int logLevel);
 /** Log a message */
 void log_process(int level, const char *fileName, int line, const char *msg, ...);
 /** Get the current time in milliseconds */

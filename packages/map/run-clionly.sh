@@ -11,8 +11,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # MPQ game data files must also be present (symlinked by install.sh).
 D2_PATH="${D2_PATH:-$SCRIPT_DIR/../../assets/d2}"
 
-if [ ! -f "$D2_PATH/Game.exe" ]; then
-    echo "ERROR: Game.exe not found at: $D2_PATH"
+if [ ! -f "$D2_PATH/Storm.dll" ]; then
+    echo "ERROR: Storm.dll not found at: $D2_PATH"
     echo ""
     echo "Run install.sh first — it sets up the assets/d2 directory."
     exit 1

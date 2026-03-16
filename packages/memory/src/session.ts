@@ -96,8 +96,8 @@ export class Diablo2GameSessionMemory {
     // Track map information
     if (mapSeed !== 0 && mapSeed !== this.state.map.id) {
       this.state.map.id = mapSeed;
-      // Use value already loaded from actMisc; fall back to CLI-flag detection if actMisc unavailable
-      this.state.map.difficulty = actMisc?.difficulty ?? (await obj.getDifficulty(act, logger));
+      // getDifficulty validates the raw value and falls back to CLI flags if garbage
+      this.state.map.difficulty = await obj.getDifficulty(act, logger);
       this.state.log.info({ map: this.state.map }, 'MapSeed:Changed');
       this.state.units.clear();
       this.state.items.clear();
