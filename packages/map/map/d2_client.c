@@ -1,5 +1,6 @@
 
 #include <stdio.h>
+#include <setjmp.h>
 #include <windows.h>
 
 #include <fstream>
@@ -33,13 +34,34 @@ CHAR *DIABLO_2_VERSION = (CHAR *)"v1.xy";
 CHAR *PATH_OF_DIABLO = "Path of Diablo";
 CHAR *PROJECT_DIABLO = "ProjectD2";
 
+/* Crash recovery: setjmp/longjmp to skip levels that trigger access violations */
+static jmp_buf crash_jmp;
+static volatile int crash_recovery_active = 0;
+int skip_act[5] = {0, 0, 0, 0, 0};
+
+/* Vectored Exception Handler — first-chance handler that fires before any
+   frame-based SEH or Fog.dll's own handler. This catches crashes that
+   Fog's exception mechanism misses (e.g. inside D2Common_LoadAct). */
+static LONG CALLBACK VectoredCrashHandler(PEXCEPTION_POINTERS pExInfo) {
+    if (crash_recovery_active &&
+        pExInfo->ExceptionRecord->ExceptionCode == EXCEPTION_ACCESS_VIOLATION) {
+        crash_recovery_active = 0;
+        longjmp(crash_jmp, 1);
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
 DWORD D2ClientInterface(VOID) {
     return D2Client.dwInit;
 }
 
 VOID __stdcall ExceptionHandler(VOID) {
+    if (crash_recovery_active) {
+        crash_recovery_active = 0;
+        longjmp(crash_jmp, 1);
+    }
     fprintf(stderr, "\n] We got a big Error here! [\n");
-    ExitProcess(0);
+    ExitProcess(1);
 }
 
 D2Version gameVersion = VersionUnknown;
@@ -155,6 +177,7 @@ void d2_game_init_vanilla() {
     log_trace("Init:Dll", lk_s("dll", "Fog.dll"));
     FOG_10021("D2");
     FOG_10019(DIABLO_2, (DWORD)ExceptionHandler, DIABLO_2_VERSION, 1);
+    AddVectoredExceptionHandler(1, VectoredCrashHandler);  /* first-chance backup */
     FOG_10101(1, 0);
     FOG_10089(1);
     if (!FOG_10218()) {
@@ -162,6 +185,24 @@ void d2_game_init_vanilla() {
         ExitProcess(1);
     }
     log_debug("Init:Dll:Done", lk_s("dll", "Fog.dll"));
+
+    // Vanilla D2: explicitly open MPQ archives.
+    // In normal D2 startup, D2Launch.dll opens these. PoD/PD2 DLLs handle it
+    // internally, but vanilla DLLs do not.  Storm ordinal 266 = SFileOpenArchive.
+    HANDLE hPatch = NULL, hExp = NULL, hData = NULL, hChar = NULL;
+    BOOL r;
+
+    r = STORM_SFileOpenArchive("Patch_D2.mpq", 3000, 0, &hPatch);
+    log_debug("Init:MPQ", lk_s("file", "Patch_D2.mpq"), lk_i("ok", r));
+
+    r = STORM_SFileOpenArchive("d2exp.mpq", 2000, 0, &hExp);
+    log_debug("Init:MPQ", lk_s("file", "d2exp.mpq"), lk_i("ok", r));
+
+    r = STORM_SFileOpenArchive("d2data.mpq", 1000, 0, &hData);
+    log_debug("Init:MPQ", lk_s("file", "d2data.mpq"), lk_i("ok", r));
+
+    r = STORM_SFileOpenArchive("d2char.mpq", 500, 0, &hChar);
+    log_debug("Init:MPQ", lk_s("file", "d2char.mpq"), lk_i("ok", r));
 
     // D2Win: try PoD ordinals (10174 + 10072), continue if they fail
     log_trace("Init:Dll", lk_s("dll", "D2Win.dll"));
@@ -181,6 +222,13 @@ void d2_game_init_vanilla() {
     log_trace("Init:Dll", lk_s("dll", "D2Common.dll"));
     D2COMMON_10081(0, 0, 0);  // ordinal 10081 = InitDataTables (vanilla 1.13d, same as PoD)
     log_debug("Init:Dll:Done", lk_s("dll", "D2Common.dll"));
+    
+    // Debug: verify D2Common base and function addresses
+    HMODULE hD2Common = GetModuleHandleA("D2Common.DLL");
+    log_debug("Init:Debug:D2Common", lk_i("base", (int)hD2Common), 
+        lk_i("InitLevel", (int)D2COMMON_Pod_InitLevel),
+        lk_i("LoadAct", (int)D2COMMON_Pod_LoadAct),
+        lk_i("GetLevel", (int)D2COMMON_Pod_GetLevel));
     // D2Client::InitGameMisc skipped: address unknown for vanilla; not required for map gen
 }
 
@@ -241,15 +289,24 @@ void d2_game_init(char *folderName) {
 }
 
 Level *__fastcall d2_get_level(ActMisc *misc, DWORD levelCode) {
+    log_trace("Map:GetLevel:Start", lk_i("misc", (int)misc), lk_i("levelCode", levelCode));
     LevelTxt *levelData = d2common_get_level_text(gameVersion, levelCode); 
     if (!levelData) return NULL;
+    log_trace("Map:GetLevel:LevelTextOk", lk_i("levelCode", levelCode));
 
+    log_trace("Map:GetLevel:WalkStart", lk_i("pLevelFirst", (int)misc->pLevelFirst));
+    int count = 0;
     for (Level *pLevel = misc->pLevelFirst; pLevel; pLevel = pLevel->pNextLevel) {
-        if (!pLevel) break;
+        log_trace("Map:GetLevel:Walk", lk_i("count", count), lk_i("pLevel", (int)pLevel), lk_i("dwLevelNo", pLevel->dwLevelNo), lk_i("pNext", (int)pLevel->pNextLevel));
         if (pLevel->dwLevelNo == levelCode) return pLevel;
+        count++;
+        if (count > 200) { log_warn("Map:GetLevel:TooManyLevels"); break; }
     }
 
-    return d2common_get_level(gameVersion, misc, levelCode);
+    log_trace("Map:GetLevel:CallingD2Common", lk_i("levelCode", levelCode));
+    Level *result = d2common_get_level(gameVersion, misc, levelCode);
+    log_trace("Map:GetLevel:D2CommonResult", lk_i("result", (int)result));
+    return result;
 }
 
 void add_collision_data(CollMap *pCol, int originX, int originY) {
@@ -466,8 +523,9 @@ int get_act(int levelCode) {
 }
 
 int d2_dump_map(int seed, int difficulty, int levelCode) {
+    log_trace("Map:DumpStart", lk_i("levelCode", levelCode));
     LevelTxt *levelData = d2common_get_level_text(gameVersion, levelCode); 
-    if (!levelData) return 1;
+    if (!levelData) { log_trace("Map:DumpFail", lk_i("levelCode", levelCode), lk_s("reason", "no_level_text")); return 1; }
 
     if (gameVersion == VersionPathOfDiablo) {
         switch (levelCode) {
@@ -486,19 +544,49 @@ int d2_dump_map(int seed, int difficulty, int levelCode) {
     } 
 
     int actId = get_act(levelCode);
-    Act *pAct = d2common_load_act(gameVersion, actId, seed, difficulty); 
-    if (!pAct) return 1;
-
-    Level *pLevel = d2_get_level(pAct->pMisc, levelCode);  // Loading Town Level
-    if (!pLevel) return 1;
-
-    char *levelName = levelData->szName;
-    if (!pLevel) {
-        log_warn("Map:SkippingLevel:FailedLoading", lk_i("mapId", levelCode), lk_s("mapName", levelName));
+    if (actId >= 0 && actId < 5 && skip_act[actId]) {
+        log_trace("Map:DumpFail", lk_i("levelCode", levelCode), lk_s("reason", "act_skipped"));
         return 1;
     }
 
-    if (!pLevel->pRoom2First) d2common_init_level(gameVersion, pLevel); 
+    /* Crash recovery: if D2Common crashes inside GetLevel/InitLevel, longjmp
+       back here instead of calling ExitProcess.  Mark the entire act as
+       broken so we don't keep retrying. */
+    fflush(stdout); fflush(stderr);  /* flush before entering dangerous code */
+    crash_recovery_active = 1;
+    if (setjmp(crash_jmp) != 0) {
+        crash_recovery_active = 0;
+        log_warn("Map:DumpFail", lk_i("levelCode", levelCode), lk_i("actId", actId), lk_s("reason", "crash_recovered"));
+        fflush(stdout); fflush(stderr);
+        if (actId >= 0 && actId < 5) {
+            skip_act[actId] = 1;
+            acts[actId] = NULL;
+            act_seeds[actId] = 0;
+            act_diff[actId] = -1;
+        }
+        return 1;
+    }
+
+    log_trace("Map:LoadAct", lk_i("levelCode", levelCode), lk_i("actId", actId));
+    Act *pAct = d2common_load_act(gameVersion, actId, seed, difficulty); 
+    if (!pAct) { crash_recovery_active = 0; log_warn("Map:DumpFail", lk_i("levelCode", levelCode), lk_s("reason", "load_act_null")); return 1; }
+    log_trace("Map:LoadActDone", lk_i("levelCode", levelCode), lk_i("actId", actId));
+
+    ActMisc *pMisc = pAct->pMisc;
+    if (!pMisc) { crash_recovery_active = 0; log_warn("Map:DumpFail", lk_i("levelCode", levelCode), lk_s("reason", "pMisc_null")); return 1; }
+
+    Level *pLevel = d2_get_level(pMisc, levelCode);
+    if (!pLevel) { crash_recovery_active = 0; log_trace("Map:DumpFail", lk_i("levelCode", levelCode), lk_s("reason", "get_level_null")); return 1; }
+
+    char *levelName = levelData->szName;
+
+    if (!pLevel->pRoom2First) {
+        d2common_init_level(gameVersion, pLevel); 
+    }
+
+    /* Dangerous section done — deactivate crash recovery */
+    crash_recovery_active = 0;
+
     if (!pLevel->pRoom2First) {
         log_warn("Map:SkippingLevel:FailedRoomLoading", lk_i("mapId", levelCode), lk_s("mapName", levelName));
         return 1;

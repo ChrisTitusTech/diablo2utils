@@ -97,9 +97,17 @@ FUNCPTR(D2WIN, 10005, DWORD __fastcall, (DWORD _1, DWORD _2, DWORD _3, d2client_
 FUNCPTR(D2LANG, 10008, DWORD __fastcall, (DWORD _1, CHAR *_2, DWORD _3), -10008)
 FUNCPTR(D2COMMON, 10943, DWORD __stdcall, (DWORD _1, DWORD _2, DWORD _3), -10943)
 
-// Vanilla 1.13c D2Client LoadAct callbacks (exported ordinals 10001/10002)
-ASMPTR(D2CLIENT, Vanilla_LoadAct_1, -10001)  // RVA 0x62e20
-ASMPTR(D2CLIENT, Vanilla_LoadAct_2, -10002)  // RVA 0x62de0
+// Vanilla 1.13d D2Client LoadAct callbacks (exported ordinals 10001/10002)
+ASMPTR(D2CLIENT, Vanilla_LoadAct_1, -10001)
+ASMPTR(D2CLIENT, Vanilla_LoadAct_2, -10002)
+
+// D2Common automap layer init (ordinal 10077 on 1.13d, RVA 0x52290)
+// Used as Func_1 callback for D2Common_LoadAct in headless map generation.
+// Signature: AutomapLayer2* __stdcall (DWORD dwLayerNo)
+FUNCPTR(D2COMMON, InitLayer, DWORD __stdcall, (DWORD dwLayerNo), -10077)
+
+// Storm MPQ archive functions (needed for vanilla D2 -- PoD/PD2 DLLs open MPQs internally)
+FUNCPTR(STORM, SFileOpenArchive, BOOL __stdcall, (const char *szPath, DWORD dwPriority, DWORD dwFlags, HANDLE *phArchive), -266)
 
 // Pod => PD2
 // InitA D2Lang.10009   -> D2Lang.10008
@@ -108,7 +116,7 @@ ASMPTR(D2CLIENT, Vanilla_LoadAct_2, -10002)  // RVA 0x62de0
 //
 
 #define _D2PTRS_START FOG_10021
-#define _D2PTRS_END D2CLIENT_Vanilla_LoadAct_2
+#define _D2PTRS_END STORM_SFileOpenArchive
 
 // #ifdef _DEFINE_VARS
 // #else

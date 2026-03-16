@@ -6,10 +6,22 @@ Act* acts[5] = {NULL, NULL, NULL, NULL, NULL};
 int act_seeds[5] = {0,0,0,0,0};
 int act_diff[5] = {-1,-1,-1,-1,-1};
 
+/* Town level IDs per act (D2Common_LoadAct requires the correct town level) */
+static const DWORD townLevelIds[5] = { 1, 40, 75, 103, 109 };
+
+/* LoadAct callbacks for vanilla headless map generation.
+   Func_1 (ActMisc+0x454): called per-level with 1 arg (dwLayerNo). __stdcall, ret $0x4.
+   Func_2 (ActMisc+0x488): called for town levels 40,103,109 (Acts 2,4,5) with
+   4 args (levelNo, unk, centerY, centerX). __stdcall, ret $0x10.
+   Both return 0 (NULL automap layer) in headless mode. */
+DWORD __stdcall loadact_stub_initlayer(DWORD nLayerNo) { (void)nLayerNo; return 0; }
+DWORD __stdcall loadact_stub_initlayer2(DWORD a, DWORD b, DWORD c, DWORD d) { (void)a; (void)b; (void)c; (void)d; return 0; }
+
 Act* d2common_load_act_run(D2Version gameVersion, int actId, int seed, int difficulty) {
-    if (gameVersion == VersionPathOfDiablo) return D2COMMON_Pod_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, 1, D2CLIENT_Pod_LoadAct_1, D2CLIENT_Pod_LoadAct_2);
-    if (gameVersion == VersionProjectDiablo2) return D2COMMON_Pd2_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, 1, D2CLIENT_Pd2_LoadAct_1, D2CLIENT_Pd2_LoadAct_2);
-    if (gameVersion == VersionDiablo2) return D2COMMON_Pod_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, 1, D2CLIENT_Vanilla_LoadAct_1, D2CLIENT_Vanilla_LoadAct_2);
+    DWORD townLevelId = (actId >= 0 && actId < 5) ? townLevelIds[actId] : 1;
+    if (gameVersion == VersionPathOfDiablo) return D2COMMON_Pod_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, townLevelId, D2CLIENT_Pod_LoadAct_1, D2CLIENT_Pod_LoadAct_2);
+    if (gameVersion == VersionProjectDiablo2) return D2COMMON_Pd2_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, townLevelId, D2CLIENT_Pd2_LoadAct_1, D2CLIENT_Pd2_LoadAct_2);
+    if (gameVersion == VersionDiablo2) return D2COMMON_Pod_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL, townLevelId, (DWORD)loadact_stub_initlayer, (DWORD)loadact_stub_initlayer2);
     return NULL;
 }
 void d2common_unload_act(D2Version gameVersion, Act* pAct) {
