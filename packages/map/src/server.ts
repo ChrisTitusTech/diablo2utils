@@ -1,5 +1,6 @@
 import cors from 'cors';
 import * as express from 'express';
+import http from 'http';
 import 'source-map-support/register.js';
 import * as ulid from 'ulid';
 import { Log } from './logger.js';
@@ -9,6 +10,7 @@ import { HealthRoute } from './routes/health.js';
 import { MapImageRoute } from './routes/map.image.js';
 import { MapActLevelRoute, MapActRoute, MapRoute } from './routes/map.js';
 import { StateGetRoute, currentGameState } from './routes/state.js';
+import { setupWebSocket, broadcastState } from './ws.js';
 
 class Diablo2MapServer {
   server = express.default();
@@ -82,16 +84,37 @@ class Diablo2MapServer {
       currentGameState.act = isNaN(act) ? currentGameState.act : act;
       currentGameState.updatedAt = Date.now();
 
-      Log.info({ seed, difficulty, act }, 'State:Updated');
+      // Accept optional player position, units, items, kills from memory reader
+      if (body.player && typeof body.player === 'object') {
+        currentGameState.player = body.player;
+      }
+      if (Array.isArray(body.units)) {
+        currentGameState.units = body.units;
+      }
+      if (Array.isArray(body.items)) {
+        currentGameState.items = body.items;
+      }
+      if (Array.isArray(body.kills)) {
+        currentGameState.kills = body.kills;
+      }
+
+      // Broadcast to all connected WebSocket clients
+      broadcastState(currentGameState);
+
+      Log.info({ seed, difficulty, act, hasPlayer: !!body.player }, 'State:Updated');
       res.status(200).json(currentGameState);
     });
 
+    const httpServer = http.createServer(this.server);
+    setupWebSocket(httpServer);
+
     await new Promise<void>((resolve) => {
-      this.server.listen(this.port, () => {
+      httpServer.listen(this.port, () => {
         Log.info(
           {
             port: this.port,
             url: 'http://localhost:' + this.port,
+            ws: 'ws://localhost:' + this.port + '/ws',
             processes: MapCluster.ProcessCount,
             version: process.env.GIT_VERSION,
             hash: process.env.GIT_HASH,

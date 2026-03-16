@@ -3,7 +3,8 @@
     "compilerOptions": {
         "lib": ["DOM"],
         "rootDir": "./src",
-        "outDir": "./build"
+        "outDir": "./build",
+        "skipLibCheck": true
     },
     "include": ["src/**/*"],
     "references": [{ "path": "../state"}]

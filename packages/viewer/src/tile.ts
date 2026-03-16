@@ -17,7 +17,7 @@ export interface MapParams {
 process = typeof process === 'undefined' ? ({ env: {} } as any) : process;
 /** Load and create tiles from a remote map host */
 export class Diablo2MapTiles {
-  static MapHost = process.env.MAP_HOST ?? 'https://diablo2.chard.dev';
+  static MapHost = typeof window !== 'undefined' ? '' : (process.env.MAP_HOST ?? 'https://diablo2.chard.dev');
 
   static tiles = new LruCache<Promise<unknown>>(1024);
   static maps = new LruCache<Promise<LevelData>>(32);

@@ -1,0 +1,48 @@
+import http from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { Log } from './logger.js';
+import { GameState } from './routes/state.js';
+
+let wss: WebSocketServer | null = null;
+const clients = new Set<WebSocket>();
+
+/**
+ * Attach a WebSocket server to the existing HTTP server at path `/ws`.
+ * Connected browsers receive JSON game-state broadcasts in real time.
+ */
+export function setupWebSocket(server: http.Server): void {
+  wss = new WebSocketServer({ server, path: '/ws' });
+
+  wss.on('connection', (ws) => {
+    clients.add(ws);
+    Log.info({ clients: clients.size }, 'WS:Connected');
+
+    ws.on('close', () => {
+      clients.delete(ws);
+      Log.info({ clients: clients.size }, 'WS:Disconnected');
+    });
+
+    ws.on('error', (err) => {
+      Log.warn({ err: String(err) }, 'WS:Error');
+      clients.delete(ws);
+    });
+  });
+
+  Log.info('WS:Ready (path=/ws)');
+}
+
+/**
+ * Broadcast the current game state to all connected WebSocket clients.
+ * Silently drops messages for clients whose send buffer is backed up.
+ */
+export function broadcastState(state: GameState): void {
+  if (clients.size === 0) return;
+  const json = JSON.stringify(state);
+  for (const ws of clients) {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(json, (err) => {
+        if (err) Log.warn({ err: String(err) }, 'WS:SendError');
+      });
+    }
+  }
+}

@@ -5,6 +5,7 @@ import { MapLayers } from './map.objects.js';
 import { registerMapProtocols } from './map.protocol.js';
 import { Diablo2GameState } from '@diablo2/state';
 import { toFeatureCollection } from '@linzjs/geojson';
+import { GameStateWsClient } from './ws.client.js';
 
 declare const maplibregl: any;
 
@@ -43,12 +44,108 @@ export class Diablo2MapViewer {
     (window as any).map = this.map;
 
     this.map.on('load', () => {
+      this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       this.trackDom();
       this.updateFromUrl();
       this.update();
       this.map.on('render', this.render);
+      this.startWebSocket();
       this.startStatePolling();
     });
+  }
+
+  /** WebSocket client for real-time state updates from the map server */
+  wsClient: GameStateWsClient | null = null;
+
+  /**
+   * Create a canvas-based arrow image and register it with the map
+   * for use as the player position marker.
+   */
+  addPlayerArrowImage(): void {
+    const size = 48;
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Draw arrow pointing up (north)
+    const cx = size / 2;
+    ctx.clearRect(0, 0, size, size);
+
+    // Outer stroke
+    ctx.beginPath();
+    ctx.moveTo(cx, 4);           // top point
+    ctx.lineTo(cx + 16, size - 8); // bottom-right
+    ctx.lineTo(cx, size - 16);     // notch
+    ctx.lineTo(cx - 16, size - 8); // bottom-left
+    ctx.closePath();
+    ctx.fillStyle = '#000000';
+    ctx.fill();
+
+    // Inner fill — bright green
+    ctx.beginPath();
+    ctx.moveTo(cx, 7);
+    ctx.lineTo(cx + 13, size - 10);
+    ctx.lineTo(cx, size - 17);
+    ctx.lineTo(cx - 13, size - 10);
+    ctx.closePath();
+    ctx.fillStyle = '#00ff88';
+    ctx.fill();
+
+    const imageData = ctx.getImageData(0, 0, size, size);
+    this.map.addImage('player-arrow', { width: size, height: size, data: imageData.data });
+  }
+
+  /**
+   * Connect to the map server's WebSocket endpoint for real-time game state.
+   * Falls back to HTTP polling when WS is unavailable.
+   */
+  startWebSocket(): void {
+    this.wsClient = new GameStateWsClient({
+      onState: (state) => this.handleStateUpdate(state),
+    });
+  }
+
+  /**
+   * Handle incoming state from either WebSocket or HTTP polling.
+   * Updates map/act/difficulty if changed, and refreshes player/units/items.
+   */
+  handleStateUpdate(state: any): void {
+    if (!state || state.seed <= 0) return;
+    if (state.updatedAt <= this.lastStateUpdatedAt) return;
+
+    this.lastStateUpdatedAt = state.updatedAt;
+    const map = this.ctx.state.map;
+    const changed =
+      map.id !== state.seed ||
+      map.act !== state.act ||
+      map.difficulty !== state.difficulty;
+
+    if (changed) {
+      map.id = state.seed;
+      map.act = state.act ?? map.act;
+      map.difficulty = state.difficulty ?? map.difficulty;
+    }
+
+    // Apply player position
+    if (state.player && state.player.x > 0) {
+      this.ctx.state.player.x = state.player.x;
+      this.ctx.state.player.y = state.player.y;
+      if (state.player.name) this.ctx.state.player.name = state.player.name;
+      if (state.player.level) this.ctx.state.player.level = state.player.level;
+      if (state.player.life != null) this.ctx.state.player.life = state.player.life;
+    }
+
+    // Apply units and items
+    if (Array.isArray(state.units)) {
+      this.ctx.state.units = state.units;
+    }
+    if (Array.isArray(state.items)) {
+      this.ctx.state.items = state.items;
+    }
+
+    this.update();
   }
 
   /** Poll the map server for game state updates pushed by the memory reader */
@@ -61,26 +158,13 @@ export class Diablo2MapViewer {
         const res = await fetch('/v1/state');
         if (!res.ok) return;
         const state = await res.json();
-        // Only update when the server has a newer state and a valid seed
-        if (state.updatedAt > this.lastStateUpdatedAt && state.seed > 0) {
-          this.lastStateUpdatedAt = state.updatedAt;
-          const map = this.ctx.state.map;
-          const changed =
-            map.id !== state.seed ||
-            map.act !== state.act ||
-            map.difficulty !== state.difficulty;
-          if (changed) {
-            map.id = state.seed;
-            map.act = state.act ?? map.act;
-            map.difficulty = state.difficulty ?? map.difficulty;
-            this.update();
-          }
-        }
+        this.handleStateUpdate(state);
       } catch {
         // server unreachable — ignore
       }
     };
-    this.stateTimer = setInterval(poll, 2000);
+    // HTTP polling is a slower fallback; WebSocket handles the real-time path
+    this.stateTimer = setInterval(poll, 5000);
     // Also run immediately so the viewer picks up the current state on load
     poll();
   }
@@ -216,13 +300,12 @@ export class Diablo2MapViewer {
     if (state.player.x > 0) {
       const { lng, lat } = LevelBounds.sourceToLatLng(state.player.x, state.player.y);
       if (this.centerOnPlayer) {
-        this.map.setCenter([lng, lat]);
-        if (this.stateZoom) this.map.setZoom(this.stateZoom); // TODO configure?
+        this.map.jumpTo({ center: [lng, lat], zoom: this.stateZoom ?? this.map.getZoom() });
       }
       const playerJson: GeoJSON.Feature = {
         type: 'Feature',
         geometry: { type: 'Point', coordinates: [lng, lat] },
-        properties: state.player,
+        properties: { ...state.player, type: 'player' },
       };
 
       const features = [playerJson];

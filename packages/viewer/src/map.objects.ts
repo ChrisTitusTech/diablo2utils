@@ -183,11 +183,11 @@ MapLayers.set('player', {
   source: 'game-state',
   type: 'circle',
   paint: {
-    'circle-radius': 10,
-    'circle-color': '#ff00ff',
-    'circle-stroke-color': '#023047',
-    'circle-stroke-width': 1,
-    'circle-opacity': 0.87,
+    'circle-radius': 8,
+    'circle-color': '#00ff88',
+    'circle-stroke-color': '#005533',
+    'circle-stroke-width': 2,
+    'circle-opacity': 0.95,
   },
   filter: ['==', 'type', 'player'],
 });

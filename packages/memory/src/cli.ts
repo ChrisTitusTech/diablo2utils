@@ -160,6 +160,29 @@ async function main(): Promise<void> {
     });
   };
 
+  // Push full game state (player position, units, items) to the map server
+  // on every state change so the viewer can track the player in real time.
+  let statePostInFlight = false;
+  session.state.onChange = (): void => {
+    if (statePostInFlight) return; // skip if a POST is still pending
+    const json = session.state.toJSON();
+    const payload = {
+      seed: json.map.id,
+      difficulty: json.map.difficulty,
+      act: json.map.act,
+      player: json.player,
+      units: json.units,
+      items: json.items,
+      kills: json.kills,
+    };
+    statePostInFlight = true;
+    httpPostJson(`${mapServerUrl}/v1/state`, payload)
+      .catch((err) => Log.trace({ err: String(err) }, 'State:PushFailed'))
+      .finally(() => {
+        statePostInFlight = false;
+      });
+  };
+
   await session.start(Log);
 }
 
