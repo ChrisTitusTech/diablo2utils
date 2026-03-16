@@ -83,6 +83,7 @@ export class Diablo2GameSessionMemory {
 
     const path = await obj.getPath(player, logger);
     const act = await obj.getAct(player, logger);
+    const stats = await obj.getStats(player, logger);
 
     // Load ActMisc once to get both mapSeed and difficulty without double-fetching
     const actMisc = act.pActMisc.isValid
@@ -101,6 +102,7 @@ export class Diablo2GameSessionMemory {
       this.state.items.clear();
       this.state.kills.clear();
       this.itemIgnore.clear();
+      this.state.dirty();
       this.onMapChange?.(mapSeed, this.state.map.difficulty, player.actId);
     }
 
@@ -110,6 +112,8 @@ export class Diablo2GameSessionMemory {
     } else {
       this.state.movePlayer(undefined, player.unitId, path.x, path.y);
     }
+
+    syncPlayerState(this.state.player, this.playerName, stats, this.state);
 
     const units = await obj.getNearBy(path, logger);
     for (const unit of units.values()) {
@@ -147,6 +151,52 @@ export class Diablo2GameSessionMemory {
     else if (duration > 5) logger.info({ duration }, 'Update:Tick:Slow');
     else logger.trace({ duration }, 'Update:Tick');
   }
+}
+
+function syncPlayerState(
+  player: Diablo2State['player'],
+  playerName: string,
+  stats: Map<Attribute, number>,
+  state: Diablo2State,
+): void {
+  let dirty = false;
+
+  if (player.name !== playerName) {
+    player.name = playerName;
+    dirty = true;
+  }
+
+  const level = getStat(stats, Attribute.CurrentLevel);
+  if (level > 0 && player.level !== level) {
+    player.level = level;
+    dirty = true;
+  }
+
+  const life = getShiftedStat(stats, Attribute.Life, 8);
+  if (life >= 0 && player.life !== life) {
+    player.life = life;
+    dirty = true;
+  }
+
+  const experience = getStat(stats, Attribute.Experience);
+  if (experience >= 0 && player.xp.current !== experience) {
+    if (player.xp.start < 0 || player.xp.start > experience) player.xp.start = experience;
+    player.xp.current = experience;
+    player.xp.diff = player.xp.current - player.xp.start;
+    dirty = true;
+  }
+
+  if (dirty) state.dirty();
+}
+
+function getStat(stats: Map<Attribute, number>, stat: Attribute): number {
+  return stats.get(stat) ?? -1;
+}
+
+function getShiftedStat(stats: Map<Attribute, number>, stat: Attribute, shift: number): number {
+  const value = stats.get(stat);
+  if (value == null) return -1;
+  return value >> shift;
 }
 
 function resolveDifficulty(

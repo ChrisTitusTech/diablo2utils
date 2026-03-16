@@ -73,6 +73,46 @@ function httpPostJson(url: string, body: Record<string, unknown>): Promise<void>
   });
 }
 
+function buildStatePayload(session: Diablo2GameSessionMemory): Record<string, unknown> | null {
+  const json = session.state.toJSON();
+  if (json.map.id <= 0) return null;
+
+  return {
+    seed: json.map.id,
+    difficulty: json.map.difficulty,
+    act: json.map.act,
+    player: {
+      x: json.player.x,
+      y: json.player.y,
+      name: json.player.name,
+      level: json.player.level,
+      life: json.player.life,
+    },
+    units: json.units.map((unit) => ({
+      id: unit.id,
+      type: unit.type,
+      name: unit.name,
+      code: 'code' in unit ? unit.code : undefined,
+      x: unit.x,
+      y: unit.y,
+      life: 'life' in unit ? unit.life : undefined,
+    })),
+    items: json.items.map((item) => ({
+      id: item.id,
+      type: item.type,
+      name: item.name,
+      code: item.code,
+      x: item.x,
+      y: item.y,
+      quality: item.quality,
+      sockets: item.sockets,
+      isEthereal: item.isEthereal,
+      isRuneWord: item.isRuneWord,
+    })),
+    kills: json.kills,
+  };
+}
+
 /**
  * Fetch map data from the @diablo2/map server for a given seed/difficulty/act.
  * This pre-warms the server cache so maps are instantly available when the user
@@ -146,11 +186,6 @@ async function main(): Promise<void> {
     const url = `${mapServerUrl}/v1/map/${seed}/${diffStr}/${act}.json`;
     Log.info({ seed, difficulty: diffName, act, url }, 'Map:Changed');
 
-    // Push the current game state to the map server so the viewer auto-updates
-    httpPostJson(`${mapServerUrl}/v1/state`, { seed, difficulty, act }).catch((err) => {
-      Log.warn({ err: String(err) }, 'State:PostFailed');
-    });
-
     // Fire-and-forget: fetch all acts from the map server in the background.
     // This pre-warms the map cache so a browser refresh is instant.
     fetchMaps(mapServerUrl, seed, difficulty, act).catch((err) => {
@@ -160,36 +195,32 @@ async function main(): Promise<void> {
     });
   };
 
-  // Push a minimal game state to the map server: player location, map seed,
-  // and rune drops only.
   let statePostInFlight = false;
-  session.state.onChange = (): void => {
-    if (statePostInFlight) return; // skip if a POST is still pending
-    const json = session.state.toJSON();
-    const payload = {
-      seed: json.map.id,
-      difficulty: json.map.difficulty,
-      act: json.map.act,
-      player: {
-        x: json.player.x,
-        y: json.player.y,
-        name: json.player.name,
-      },
-      items: json.items.map((item) => ({
-        id: item.id,
-        type: item.type,
-        name: item.name,
-        code: item.code,
-        x: item.x,
-        y: item.y,
-      })),
-    };
+  let statePostPending = false;
+
+  const pushState = (): void => {
+    const payload = buildStatePayload(session);
+    if (payload == null) return;
+
+    if (statePostInFlight) {
+      statePostPending = true;
+      return;
+    }
+
     statePostInFlight = true;
     httpPostJson(`${mapServerUrl}/v1/state`, payload)
       .catch((err) => Log.trace({ err: String(err) }, 'State:PushFailed'))
       .finally(() => {
         statePostInFlight = false;
+        if (statePostPending) {
+          statePostPending = false;
+          pushState();
+        }
       });
+  };
+
+  session.state.onChange = (): void => {
+    pushState();
   };
 
   await session.start(Log);
