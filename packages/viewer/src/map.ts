@@ -778,6 +778,14 @@ export class Diablo2MapViewer {
   }
 
   updateDebugDocument(doc: Document): void {
+    const copyButton = doc.querySelector('.debug-panel__copy') as HTMLButtonElement | null;
+    if (copyButton && copyButton.dataset.bound !== 'true') {
+      copyButton.dataset.bound = 'true';
+      copyButton.addEventListener('click', (): void => {
+        void this.copyDebugOutput(doc);
+      });
+    }
+
     const summary = doc.querySelector('.debug-panel__summary') as HTMLDivElement | null;
     if (summary) {
       summary.innerText = this.debugState.issues[0] ?? 'Viewer and D2R state are in sync';
@@ -786,52 +794,118 @@ export class Diablo2MapViewer {
 
     const serverEl = doc.querySelector('.debug-panel__server') as HTMLPreElement | null;
     if (serverEl) {
-      serverEl.textContent = [
-        `source      ${this.debugState.server.source.toUpperCase()} received ${this.formatAge(this.debugState.server.receivedAt)}`,
-        `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (payload ${this.formatAge(this.debugState.server.updatedAt)})`,
-        `ignored     ${this.debugState.server.ignoredInvalidAt > 0 ? `${this.debugState.server.ignoredInvalidSource.toUpperCase()} invalid seed ${this.debugState.server.ignoredInvalidSeed > 0 ? toHex(this.debugState.server.ignoredInvalidSeed, 8) : 'n/a'} @ ${this.formatAge(this.debugState.server.ignoredInvalidAt)}` : 'none'}`,
-        `seed         ${this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : 'n/a'}`,
-        `difficulty   ${this.formatDifficulty(this.debugState.server.difficulty)}`,
-        `act          raw=${this.formatAct(this.debugState.server.act)} resolved=${this.formatAct(this.debugState.server.resolvedAct)}`,
-        `level        reported=${this.debugState.server.reportedLevelId || 'n/a'} ${this.formatLevelLabel(this.debugState.server.reportedLevelId)}`,
-        `player       ${this.debugState.server.playerName || 'n/a'} @ (${this.debugState.server.playerX}, ${this.debugState.server.playerY})`,
-        `life         ${this.debugState.server.playerLife || 0}`,
-      ].join('\n');
+      serverEl.textContent = this.buildServerDebugLines().join('\n');
     }
 
     const viewerEl = doc.querySelector('.debug-panel__viewer') as HTMLPreElement | null;
     if (viewerEl) {
-      viewerEl.textContent = [
-        `seed         ${this.debugState.viewer.seed > 0 ? toHex(this.debugState.viewer.seed, 8) : 'n/a'}`,
-        `difficulty   ${this.formatDifficulty(this.debugState.viewer.difficulty)}`,
-        `act          ${this.formatAct(this.debugState.viewer.act)}`,
-        `level        ${this.debugState.viewer.levelId || 'n/a'} ${this.formatLevelLabel(this.debugState.viewer.levelId)}`,
-        `player       ${this.debugState.viewer.hasPlayer ? 'tracked' : 'waiting'} @ (${this.debugState.viewer.playerX}, ${this.debugState.viewer.playerY})`,
-        `zoom         ${this.debugState.viewer.zoom}`,
-        `style url    ${this.debugState.viewer.mapUrl || 'n/a'}`,
-      ].join('\n');
+      viewerEl.textContent = this.buildViewerDebugLines().join('\n');
     }
 
     const syncEl = doc.querySelector('.debug-panel__sync') as HTMLPreElement | null;
     if (syncEl) {
-      const issues = this.debugState.issues.length > 0 ? this.debugState.issues.map((issue) => `- ${issue}`).join('\n') : '- none';
-      syncEl.textContent = [
-        `ws           ${this.debugState.ws.status} msgs=${this.debugState.ws.messages} last=${this.formatAge(this.debugState.ws.lastMessageAt)}`,
-        `http         ok=${this.debugState.http.successCount} fail=${this.debugState.http.failureCount} last=${this.formatAge(this.debugState.http.lastSuccessAt)}`,
-        `reconcile    reported=${this.debugState.reconcile.reportedLevelId || 'n/a'} inferred=${this.debugState.reconcile.inferredLevelId || 'n/a'} selected=${this.debugState.reconcile.selectedLevelId || 'n/a'}`,
-        `reconcile    ${this.debugState.reconcile.reportedLevelName || 'n/a'} -> ${this.debugState.reconcile.inferredLevelName || 'n/a'} -> ${this.debugState.reconcile.selectedLevelName || 'n/a'}`,
-        `map fetch    ok=${this.debugState.mapFetch.okCount} fail=${this.debugState.mapFetch.errorCount} last=${this.debugState.mapFetch.lastPath || 'n/a'}`,
-        `issues`,
-        issues,
-      ].join('\n');
+      syncEl.textContent = this.buildSyncDebugLines().join('\n');
     }
 
     const eventsEl = doc.querySelector('.debug-panel__events') as HTMLPreElement | null;
     if (eventsEl) {
-      eventsEl.textContent = this.debugEvents
-        .slice(0, 14)
-        .map((event) => `[${new Date(event.time).toLocaleTimeString()}] ${event.kind} ${event.message}`)
-        .join('\n');
+      eventsEl.textContent = this.buildEventDebugLines().join('\n');
+    }
+  }
+
+  buildServerDebugLines(): string[] {
+    return [
+      `source      ${this.debugState.server.source.toUpperCase()} received ${this.formatAge(this.debugState.server.receivedAt)}`,
+      `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (payload ${this.formatAge(this.debugState.server.updatedAt)})`,
+      `ignored     ${this.debugState.server.ignoredInvalidAt > 0 ? `${this.debugState.server.ignoredInvalidSource.toUpperCase()} invalid seed ${this.debugState.server.ignoredInvalidSeed > 0 ? toHex(this.debugState.server.ignoredInvalidSeed, 8) : 'n/a'} @ ${this.formatAge(this.debugState.server.ignoredInvalidAt)}` : 'none'}`,
+      `seed         ${this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : 'n/a'}`,
+      `difficulty   ${this.formatDifficulty(this.debugState.server.difficulty)}`,
+      `act          raw=${this.formatAct(this.debugState.server.act)} resolved=${this.formatAct(this.debugState.server.resolvedAct)}`,
+      `level        reported=${this.debugState.server.reportedLevelId || 'n/a'} ${this.formatLevelLabel(this.debugState.server.reportedLevelId)}`,
+      `player       ${this.debugState.server.playerName || 'n/a'} @ (${this.debugState.server.playerX}, ${this.debugState.server.playerY})`,
+      `life         ${this.debugState.server.playerLife || 0}`,
+    ];
+  }
+
+  buildViewerDebugLines(): string[] {
+    return [
+      `seed         ${this.debugState.viewer.seed > 0 ? toHex(this.debugState.viewer.seed, 8) : 'n/a'}`,
+      `difficulty   ${this.formatDifficulty(this.debugState.viewer.difficulty)}`,
+      `act          ${this.formatAct(this.debugState.viewer.act)}`,
+      `level        ${this.debugState.viewer.levelId || 'n/a'} ${this.formatLevelLabel(this.debugState.viewer.levelId)}`,
+      `player       ${this.debugState.viewer.hasPlayer ? 'tracked' : 'waiting'} @ (${this.debugState.viewer.playerX}, ${this.debugState.viewer.playerY})`,
+      `zoom         ${this.debugState.viewer.zoom}`,
+      `style url    ${this.debugState.viewer.mapUrl || 'n/a'}`,
+    ];
+  }
+
+  buildSyncDebugLines(): string[] {
+    const issues = this.debugState.issues.length > 0 ? this.debugState.issues.map((issue) => `- ${issue}`) : ['- none'];
+    return [
+      `ws           ${this.debugState.ws.status} msgs=${this.debugState.ws.messages} last=${this.formatAge(this.debugState.ws.lastMessageAt)}`,
+      `http         ok=${this.debugState.http.successCount} fail=${this.debugState.http.failureCount} last=${this.formatAge(this.debugState.http.lastSuccessAt)}`,
+      `reconcile    reported=${this.debugState.reconcile.reportedLevelId || 'n/a'} inferred=${this.debugState.reconcile.inferredLevelId || 'n/a'} selected=${this.debugState.reconcile.selectedLevelId || 'n/a'}`,
+      `reconcile    ${this.debugState.reconcile.reportedLevelName || 'n/a'} -> ${this.debugState.reconcile.inferredLevelName || 'n/a'} -> ${this.debugState.reconcile.selectedLevelName || 'n/a'}`,
+      `map fetch    ok=${this.debugState.mapFetch.okCount} fail=${this.debugState.mapFetch.errorCount} last=${this.debugState.mapFetch.lastPath || 'n/a'}`,
+      'issues',
+      ...issues,
+    ];
+  }
+
+  buildEventDebugLines(): string[] {
+    return this.debugEvents
+      .slice(0, 14)
+      .map((event) => `[${new Date(event.time).toLocaleTimeString()}] ${event.kind} ${event.message}`);
+  }
+
+  buildDebugText(): string {
+    return [
+      'Viewer Debug Output',
+      `Summary: ${this.debugState.issues[0] ?? 'Viewer and D2R state are in sync'}`,
+      '',
+      '[Server state]',
+      ...this.buildServerDebugLines(),
+      '',
+      '[Viewer state]',
+      ...this.buildViewerDebugLines(),
+      '',
+      '[Sync diagnostics]',
+      ...this.buildSyncDebugLines(),
+      '',
+      '[Recent events]',
+      ...this.buildEventDebugLines(),
+    ].join('\n');
+  }
+
+  async copyDebugOutput(doc: Document): Promise<void> {
+    const text = this.buildDebugText();
+    const statusEl = doc.querySelector('.debug-panel__copy-status') as HTMLSpanElement | null;
+    const setStatus = (message: string, state: 'ok' | 'error'): void => {
+      if (!statusEl) return;
+      statusEl.textContent = message;
+      statusEl.dataset.state = state;
+    };
+
+    try {
+      const nav = doc.defaultView?.navigator ?? window.navigator;
+      if (nav?.clipboard?.writeText) {
+        await nav.clipboard.writeText(text);
+      } else {
+        const textarea = doc.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', 'true');
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        doc.body.appendChild(textarea);
+        textarea.select();
+        doc.execCommand('copy');
+        doc.body.removeChild(textarea);
+      }
+      setStatus('Copied.', 'ok');
+      this.recordDebugEvent('debug:copy', 'Copied debug output to clipboard');
+    } catch (err) {
+      setStatus('Copy failed.', 'error');
+      this.recordDebugEvent('debug:copy-error', 'Failed to copy debug output', { error: err instanceof Error ? err.message : String(err) }, 'warn');
     }
   }
 
@@ -868,51 +942,90 @@ export class Diablo2MapViewer {
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      padding: 16px;
+      padding: 14px;
       font-family: 'Roboto Condensed', Arial, sans-serif;
       background: #0e1318;
       color: #d7e3f4;
     }
+    .debug-panel__toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
     h1 {
-      margin: 0 0 12px;
-      font-size: 2.8rem;
+      margin: 0;
+      font-size: 2rem;
       color: #f7fafc;
     }
+    .debug-panel__actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .debug-panel__copy {
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.08);
+      color: #f7fafc;
+      border-radius: 4px;
+      padding: 6px 10px;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.9rem;
+    }
+    .debug-panel__copy:hover {
+      background: rgba(255, 255, 255, 0.14);
+    }
+    .debug-panel__copy-status {
+      min-width: 72px;
+      font-size: 0.85rem;
+      color: #a0aec0;
+      text-align: right;
+    }
+    .debug-panel__copy-status[data-state="ok"] { color: #68d391; }
+    .debug-panel__copy-status[data-state="error"] { color: #fc8181; }
     .debug-panel__summary {
       font-weight: bold;
-      margin-bottom: 12px;
-      font-size: 1.6rem;
+      margin-bottom: 10px;
+      font-size: 1rem;
     }
     .debug-panel__summary[data-state="ok"] { color: #68d391; }
     .debug-panel__summary[data-state="warning"] { color: #f6ad55; }
     .debug-panel__grid {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-      gap: 12px;
+      gap: 10px;
     }
     .debug-panel__card {
       background: rgba(255, 255, 255, 0.05);
       border-radius: 6px;
-      padding: 12px;
+      padding: 10px;
       min-height: 180px;
     }
     .debug-panel__card h5 {
-      margin: 0 0 8px;
+      margin: 0 0 6px;
       color: #f7fafc;
-      font-size: 1.5rem;
+      font-size: 1rem;
     }
     .debug-panel__card pre {
       margin: 0;
       white-space: pre-wrap;
       word-break: break-word;
-      font-size: 1.2rem;
-      line-height: 1.4;
+      font-size: 0.82rem;
+      line-height: 1.3;
       color: #d7e3f4;
     }
   </style>
 </head>
 <body>
-  <h1>Viewer Debug Output</h1>
+  <div class="debug-panel__toolbar">
+    <h1>Viewer Debug Output</h1>
+    <div class="debug-panel__actions">
+      <button class="debug-panel__copy" type="button">Copy All</button>
+      <span class="debug-panel__copy-status" data-state="ok"></span>
+    </div>
+  </div>
   <div class="debug-panel__summary" data-state="ok">Viewer and D2R state are in sync</div>
   <div class="debug-panel__grid">
     <div class="debug-panel__card">
