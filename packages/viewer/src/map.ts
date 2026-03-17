@@ -67,6 +67,12 @@ export class Diablo2MapViewer {
       playerY: 0,
       playerLife: 0,
       hasPlayer: false,
+      ignoredInvalidAt: 0,
+      ignoredInvalidSource: '' as '' | ViewerStateSource,
+      ignoredInvalidSeed: 0,
+      ignoredInvalidUpdatedAt: 0,
+      ignoredInvalidDifficulty: 0,
+      ignoredInvalidAct: 0,
     },
     viewer: {
       seed: 0,
@@ -223,21 +229,37 @@ export class Diablo2MapViewer {
     if (!state) return;
     if (state.seed <= 0) {
       const invalidHasPlayer = !!state.player && state.player.x > 0 && state.player.y > 0;
-      this.debugState.server = {
-        source,
-        receivedAt: Date.now(),
-        updatedAt: state.updatedAt ?? 0,
-        seed: state.seed ?? 0,
-        difficulty: state.difficulty ?? this.debugState.server.difficulty ?? 0,
-        act: state.act ?? this.debugState.server.act ?? 0,
-        resolvedAct: state.act ?? this.debugState.server.resolvedAct ?? 0,
-        reportedLevelId: state.levelId ?? 0,
-        playerName: state.player?.name ?? this.debugState.server.playerName,
-        playerX: state.player?.x ?? 0,
-        playerY: state.player?.y ?? 0,
-        playerLife: state.player?.life ?? 0,
-        hasPlayer: invalidHasPlayer,
-      };
+      const hasValidServerState = this.debugState.server.seed > 0 && this.debugState.server.updatedAt > 0;
+      if (hasValidServerState) {
+        this.debugState.server.ignoredInvalidAt = Date.now();
+        this.debugState.server.ignoredInvalidSource = source;
+        this.debugState.server.ignoredInvalidSeed = state.seed ?? 0;
+        this.debugState.server.ignoredInvalidUpdatedAt = state.updatedAt ?? 0;
+        this.debugState.server.ignoredInvalidDifficulty = state.difficulty ?? 0;
+        this.debugState.server.ignoredInvalidAct = state.act ?? 0;
+      } else {
+        this.debugState.server = {
+          source,
+          receivedAt: Date.now(),
+          updatedAt: state.updatedAt ?? 0,
+          seed: state.seed ?? 0,
+          difficulty: state.difficulty ?? this.debugState.server.difficulty ?? 0,
+          act: state.act ?? this.debugState.server.act ?? 0,
+          resolvedAct: state.act ?? this.debugState.server.resolvedAct ?? 0,
+          reportedLevelId: state.levelId ?? 0,
+          playerName: state.player?.name ?? this.debugState.server.playerName,
+          playerX: state.player?.x ?? 0,
+          playerY: state.player?.y ?? 0,
+          playerLife: state.player?.life ?? 0,
+          hasPlayer: invalidHasPlayer,
+          ignoredInvalidAt: Date.now(),
+          ignoredInvalidSource: source,
+          ignoredInvalidSeed: state.seed ?? 0,
+          ignoredInvalidUpdatedAt: state.updatedAt ?? 0,
+          ignoredInvalidDifficulty: state.difficulty ?? 0,
+          ignoredInvalidAct: state.act ?? 0,
+        };
+      }
       this.recordDebugEvent(
         'state:invalid-seed',
         `Ignoring ${source.toUpperCase()} state with invalid seed`,
@@ -293,6 +315,12 @@ export class Diablo2MapViewer {
       playerY: state.player?.y ?? 0,
       playerLife: state.player?.life ?? 0,
       hasPlayer,
+      ignoredInvalidAt: 0,
+      ignoredInvalidSource: '',
+      ignoredInvalidSeed: 0,
+      ignoredInvalidUpdatedAt: 0,
+      ignoredInvalidDifficulty: 0,
+      ignoredInvalidAct: 0,
     };
 
     if (hasPlayer) {
@@ -688,6 +716,11 @@ export class Diablo2MapViewer {
     if (!server.hasPlayer) {
       issues.push('No player coordinates in the latest server state');
     }
+    if (server.ignoredInvalidAt > 0) {
+      issues.push(
+        `Ignored invalid ${server.ignoredInvalidSource.toUpperCase()} state (${this.formatAge(server.ignoredInvalidAt)}; seed ${server.ignoredInvalidSeed > 0 ? toHex(server.ignoredInvalidSeed, 8) : 'n/a'})`,
+      );
+    }
     if (this.debugState.mapFetch.lastError) {
       issues.push(`Last map fetch failed: ${this.debugState.mapFetch.lastError}`);
     }
@@ -756,6 +789,7 @@ export class Diablo2MapViewer {
       serverEl.textContent = [
         `source      ${this.debugState.server.source.toUpperCase()} received ${this.formatAge(this.debugState.server.receivedAt)}`,
         `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (payload ${this.formatAge(this.debugState.server.updatedAt)})`,
+        `ignored     ${this.debugState.server.ignoredInvalidAt > 0 ? `${this.debugState.server.ignoredInvalidSource.toUpperCase()} invalid seed ${this.debugState.server.ignoredInvalidSeed > 0 ? toHex(this.debugState.server.ignoredInvalidSeed, 8) : 'n/a'} @ ${this.formatAge(this.debugState.server.ignoredInvalidAt)}` : 'none'}`,
         `seed         ${this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : 'n/a'}`,
         `difficulty   ${this.formatDifficulty(this.debugState.server.difficulty)}`,
         `act          raw=${this.formatAct(this.debugState.server.act)} resolved=${this.formatAct(this.debugState.server.resolvedAct)}`,
