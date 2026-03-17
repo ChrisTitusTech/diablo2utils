@@ -655,6 +655,8 @@ export class Diablo2MapViewer {
     const viewer = this.debugState.viewer;
     const reconcile = this.debugState.reconcile;
     const now = Date.now();
+    const serverPayloadAge = server.updatedAt > 0 ? now - server.updatedAt : 0;
+    const serverReceiveAge = server.receivedAt > 0 ? now - server.receivedAt : 0;
 
     if (server.seed > 0 && viewer.seed > 0 && server.seed !== viewer.seed) {
       issues.push(`Seed mismatch: server=${toHex(server.seed, 8)} viewer=${toHex(viewer.seed, 8)}`);
@@ -671,8 +673,14 @@ export class Diablo2MapViewer {
     if (reconcile.inferredLevelId > 0 && viewer.levelId > 0 && viewer.levelId !== reconcile.inferredLevelId) {
       issues.push(`Viewer level drift: viewer=${viewer.levelId} inferred=${reconcile.inferredLevelId}`);
     }
-    if (server.updatedAt > 0 && now - server.updatedAt > 5000) {
-      issues.push(`Server state is stale (${this.formatAge(server.updatedAt)})`);
+    if (server.updatedAt > 0 && serverPayloadAge > 5000) {
+      if (server.receivedAt > 0 && Math.abs(serverReceiveAge - serverPayloadAge) > 2000) {
+        issues.push(
+          `Server payload is stale (${this.formatAge(server.updatedAt)} old; latest ${server.source.toUpperCase()} transport ${this.formatAge(server.receivedAt)})`,
+        );
+      } else {
+        issues.push(`Server state is stale (${this.formatAge(server.updatedAt)})`);
+      }
     }
     if (this.debugState.ws.status !== 'open') {
       issues.push('WebSocket disconnected — relying on HTTP polling');
@@ -746,8 +754,8 @@ export class Diablo2MapViewer {
     const serverEl = doc.querySelector('.debug-panel__server') as HTMLPreElement | null;
     if (serverEl) {
       serverEl.textContent = [
-        `source      ${this.debugState.server.source.toUpperCase()} (${this.formatAge(this.debugState.server.receivedAt)})`,
-        `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (${this.formatAge(this.debugState.server.updatedAt)})`,
+        `source      ${this.debugState.server.source.toUpperCase()} received ${this.formatAge(this.debugState.server.receivedAt)}`,
+        `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (payload ${this.formatAge(this.debugState.server.updatedAt)})`,
         `seed         ${this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : 'n/a'}`,
         `difficulty   ${this.formatDifficulty(this.debugState.server.difficulty)}`,
         `act          raw=${this.formatAct(this.debugState.server.act)} resolved=${this.formatAct(this.debugState.server.resolvedAct)}`,
