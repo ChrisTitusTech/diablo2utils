@@ -6,6 +6,14 @@
 export interface WsClientOptions {
   /** Called on every state message from the server */
   onState: (state: any) => void;
+  /** Called when the WebSocket connection opens */
+  onOpen?: () => void;
+  /** Called when the WebSocket connection closes */
+  onClose?: () => void;
+  /** Called when the WebSocket receives an error */
+  onError?: () => void;
+  /** Called when a raw WebSocket message is received */
+  onMessage?: () => void;
   /** Base URL override; defaults to deriving from window.location */
   url?: string;
   /** Reconnect delay in ms (default 2000) */
@@ -16,12 +24,20 @@ export class GameStateWsClient {
   private ws: WebSocket | null = null;
   private url: string;
   private onState: (state: any) => void;
+  private onOpen?: () => void;
+  private onClose?: () => void;
+  private onError?: () => void;
+  private onMessage?: () => void;
   private reconnectDelay: number;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
 
   constructor(opts: WsClientOptions) {
     this.onState = opts.onState;
+    this.onOpen = opts.onOpen;
+    this.onClose = opts.onClose;
+    this.onError = opts.onError;
+    this.onMessage = opts.onMessage;
     this.reconnectDelay = opts.reconnectDelay ?? 2000;
 
     if (opts.url) {
@@ -45,9 +61,11 @@ export class GameStateWsClient {
 
     this.ws.onopen = () => {
       console.log('[WS] connected to', this.url);
+      this.onOpen?.();
     };
 
     this.ws.onmessage = (ev: MessageEvent) => {
+      this.onMessage?.();
       try {
         const state = JSON.parse(ev.data);
         this.onState(state);
@@ -58,10 +76,12 @@ export class GameStateWsClient {
 
     this.ws.onclose = () => {
       console.log('[WS] disconnected, reconnecting in', this.reconnectDelay, 'ms');
+      this.onClose?.();
       this.scheduleReconnect();
     };
 
     this.ws.onerror = () => {
+      this.onError?.();
       // onclose will fire after this — let it handle reconnect
       this.ws?.close();
     };

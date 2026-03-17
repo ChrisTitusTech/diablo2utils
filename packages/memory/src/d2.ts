@@ -101,6 +101,6 @@ export class Diablo2Process {
     }
 
     logger.warn({ playerName }, 'Player:NotFound');
-    process.exit();
+    return null;
   }
 }

@@ -37,14 +37,25 @@
             font-weight: bold;
         }
 
-        header,
-        footer {
-            padding-top: 16px;
+        header {
+            padding-top: 10px;
             max-width: 1600px;
             margin: auto;
             display: flex;
             align-items: center;
             justify-content: space-between;
+        }
+
+        .header__left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header__title {
+            margin: 0;
+            font-size: 2.6rem;
+            line-height: 1;
         }
 
         #map-seed {
@@ -88,6 +99,23 @@
         .options__seed {
             margin-left: 4px;
         }
+
+        .options__player-status {
+            margin-left: 4px;
+            font-weight: bold;
+        }
+
+        .options__player-status[data-state="live"] {
+            color: #2f855a;
+        }
+
+        .options__player-status[data-state="waiting"] {
+            color: #b7791f;
+        }
+
+        .options__debug {
+            margin: 0;
+        }
     </style>
 
 
@@ -96,9 +124,11 @@
 <body>
     <div id="content">
         <header>
-            <h1>Diablo 2 Maps</h1>
+            <div class="header__left">
+                <button class="options__debug button button-clear" type="button">Debug Output</button>
+                <h1 class="header__title">Diablo 2 Maps</h1>
+            </div>
             <div class="options">
-
                 <span class="options__difficulty-label options__label">Difficulty: </span>
                 <button class="options__difficulty options__difficulty-0 button button-outline"
                     value="Normal">Normal</button>
@@ -114,14 +144,13 @@
                 <button class="options__act options__act-4 button button-clear" value="ActV">Act V</button>
                 <span class="options__seed-label options__label">Map Seed: </span>
                 <span class="options__seed">0x00000072</span>
+                <span class="options__player-status-label options__label">Player: </span>
+                <span class="options__player-status" data-state="waiting">Waiting for player</span>
             </div>
         </header>
         <content id="main">
             <div id="main-map"></div>
         </content>
-        <footer>
-            Github <a href="https://github.com/blacha/diablo2">blacha/diablo2</a>
-        </footer>
     </div>
 </body>
 

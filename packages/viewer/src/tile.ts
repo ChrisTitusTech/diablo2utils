@@ -8,10 +8,26 @@ export interface MapParams {
   seed: number;
   difficulty: number;
   act: number;
+  levelId?: number;
   x: number;
   y: number;
   z: number;
   rasterFillColor: string;
+}
+
+interface MapFetchDebugDetail {
+  phase: 'start' | 'success' | 'error';
+  url: string;
+  path: string;
+  seed: number;
+  difficulty: number;
+  act: number;
+  levelId?: number;
+  status?: number;
+  statusText?: string;
+  error?: string;
+  levelCount?: number;
+  occurredAt: number;
 }
 
 process = typeof process === 'undefined' ? ({ env: {} } as any) : process;
@@ -22,30 +38,67 @@ export class Diablo2MapTiles {
   static tiles = new LruCache<Promise<unknown>>(1024);
   static maps = new LruCache<Promise<LevelData>>(32);
 
-  static url(difficulty: Difficulty, seed: number, act: number): string {
-    return `v1/map/${toHex(seed, 8)}/${Difficulty[difficulty]}/${Act[act]}.json`;
+  static url(difficulty: Difficulty, seed: number, act: number, levelId?: number): string {
+    const base = `v1/map/${toHex(seed, 8)}/${Difficulty[difficulty]}/${Act[act]}`;
+    return levelId != null && levelId > 0 ? `${base}/${levelId}.json` : `${base}.json`;
   }
 
-  static get(difficulty: Difficulty, seed: number, act: number): Promise<LevelData> {
-    const mapId = [difficulty, toHex(seed, 8), act].join('__');
+  static get(difficulty: Difficulty, seed: number, act: number, levelId?: number): Promise<LevelData> {
+    const mapId = [difficulty, toHex(seed, 8), act, levelId ?? 0].join('__');
     let existing = this.maps.get(mapId);
     if (existing == null) {
-      existing = this.fetch(difficulty, seed, act);
+      existing = this.fetch(difficulty, seed, act, levelId);
       this.maps.set(mapId, existing);
     }
     return existing;
   }
 
-  static async fetch(difficulty: Difficulty, seed: number, act: number): Promise<LevelData> {
-    const path = Diablo2MapTiles.url(difficulty, seed, act);
+  static async fetch(difficulty: Difficulty, seed: number, act: number, levelId?: number): Promise<LevelData> {
+    const path = Diablo2MapTiles.url(difficulty, seed, act, levelId);
     const url = `${Diablo2MapTiles.MapHost}/${path}`;
     console.log('Fetching', { url });
+    this.emitDebug({ phase: 'start', url, path, seed, difficulty, act, levelId, occurredAt: Date.now() });
 
     const res = await fetch(url);
-    if (!res.ok) throw new Error(`Failed to fetch: ${url} - ${res.status} - ${res.statusText}`);
+    if (!res.ok) {
+      this.emitDebug({
+        phase: 'error',
+        url,
+        path,
+        seed,
+        difficulty,
+        act,
+        levelId,
+        status: res.status,
+        statusText: res.statusText,
+        error: `Failed to fetch: ${url} - ${res.status} - ${res.statusText}`,
+        occurredAt: Date.now(),
+      });
+      throw new Error(`Failed to fetch: ${url} - ${res.status} - ${res.statusText}`);
+    }
 
     const json = await res.json();
+    this.emitDebug({
+      phase: 'success',
+      url,
+      path,
+      seed,
+      difficulty,
+      act,
+      levelId,
+      status: res.status,
+      statusText: res.statusText,
+      levelCount: Array.isArray(json?.levels) ? json.levels.length : undefined,
+      occurredAt: Date.now(),
+    });
     return new LevelData(json);
+  }
+
+  static emitDebug(detail: MapFetchDebugDetail): void {
+    if (typeof window === 'undefined' || typeof window.dispatchEvent !== 'function' || typeof CustomEvent === 'undefined') {
+      return;
+    }
+    window.dispatchEvent(new CustomEvent('d2:map-fetch', { detail }));
   }
 
   static getRaster(d: MapParams): Promise<unknown> {
@@ -59,12 +112,12 @@ export class Diablo2MapTiles {
   }
 
   static async tileRaster(d: MapParams): Promise<ArrayBuffer | void> {
-    const map = await this.get(d.difficulty, d.seed, d.act);
+    const map = await this.get(d.difficulty, d.seed, d.act, d.levelId);
     // const tileId = ['raster', toHex(d.difficulty, 8), Act[d.act], d.seed, d.z, d.x, d.y].join('__');
     // const startTime = Date.now();
 
     const bounds = LevelBounds.tileToSourceBounds(d.x, d.y, d.z);
-    const zones = map.findMaps(d.act, bounds);
+    const zones = map.findMaps(d.act, bounds, d.levelId);
 
     if (zones.length === 0) return;
 
@@ -108,11 +161,40 @@ export class LevelData {
     return true;
   }
 
-  findMaps(act: Act, bounds: Bounds): Diablo2Level[] {
+  static isPointInMap(mapInfo: Diablo2Level, x: number, y: number): boolean {
+    if (x < mapInfo.offset.x) return false;
+    if (y < mapInfo.offset.y) return false;
+    if (x >= mapInfo.offset.x + mapInfo.size.width) return false;
+    if (y >= mapInfo.offset.y + mapInfo.size.height) return false;
+    return true;
+  }
+
+  findLevelAtPoint(act: Act, x: number, y: number, preferredLevelId?: number): Diablo2Level | null {
+    const matches: Diablo2Level[] = [];
+
+    for (const map of this.levels.values()) {
+      const mapAct = ActUtil.fromLevel(map.id);
+      if (mapAct !== act) continue;
+      if (!LevelData.isPointInMap(map, x, y)) continue;
+      matches.push(map);
+    }
+
+    if (matches.length === 0) return null;
+    if (preferredLevelId != null && preferredLevelId > 0) {
+      const preferred = matches.find((map) => map.id === preferredLevelId);
+      if (preferred) return preferred;
+    }
+
+    matches.sort((a, b) => a.size.width * a.size.height - b.size.width * b.size.height);
+    return matches[0] ?? null;
+  }
+
+  findMaps(act: Act, bounds: Bounds, levelId?: number): Diablo2Level[] {
     const output: Diablo2Level[] = [];
     for (const map of this.levels.values()) {
       const mapAct = ActUtil.fromLevel(map.id);
       if (mapAct !== act) continue;
+      if (levelId != null && levelId > 0 && map.id !== levelId) continue;
       if (!LevelData.isMapInBounds(map, bounds)) continue;
       output.push(map);
     }

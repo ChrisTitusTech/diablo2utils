@@ -76,18 +76,23 @@ function httpPostJson(url: string, body: Record<string, unknown>): Promise<void>
 function buildStatePayload(session: Diablo2GameSessionMemory): Record<string, unknown> | null {
   const json = session.state.toJSON();
   if (json.map.id <= 0) return null;
+  const map = json.map as typeof json.map & { levelId?: number };
+  const hasPlayer = json.player.x > 0 && json.player.y > 0;
 
   return {
-    seed: json.map.id,
-    difficulty: json.map.difficulty,
-    act: json.map.act,
-    player: {
-      x: json.player.x,
-      y: json.player.y,
-      name: json.player.name,
-      level: json.player.level,
-      life: json.player.life,
-    },
+    seed: map.id,
+    difficulty: map.difficulty,
+    act: map.act,
+    levelId: map.levelId,
+    player: hasPlayer
+      ? {
+          x: json.player.x,
+          y: json.player.y,
+          name: json.player.name,
+          level: json.player.level,
+          life: json.player.life,
+        }
+      : null,
     units: json.units.map((unit) => ({
       id: unit.id,
       type: unit.type,

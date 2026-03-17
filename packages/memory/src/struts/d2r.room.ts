@@ -13,6 +13,20 @@ export const D2rRoomStrut = bp.object('Room', {
 
 D2rRoomStrut.setSize(0xb8);
 
+export const D2rRoomExStrut = bp.object('RoomEx', {
+  pLevel: at(0x90, new Pointer(u8)),
+});
+
+D2rRoomExStrut.setSize(0x98);
+
+export const D2rLevelStrut = bp.object('Level', {
+  levelId: at(0x1f8, lu32),
+});
+
+D2rLevelStrut.setSize(0x200);
+
 export const RoomPointer = new Pointer(D2rRoomStrut);
 
 export type RoomS = StrutInfer<typeof D2rRoomStrut>;
+export type RoomExS = StrutInfer<typeof D2rRoomExStrut>;
+export type LevelS = StrutInfer<typeof D2rLevelStrut>;

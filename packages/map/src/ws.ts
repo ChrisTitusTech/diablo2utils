@@ -2,6 +2,7 @@ import http from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { Log } from './logger.js';
 import { GameState } from './routes/state.js';
+import { currentGameState } from './routes/state.js';
 
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
@@ -16,6 +17,12 @@ export function setupWebSocket(server: http.Server): void {
   wss.on('connection', (ws) => {
     clients.add(ws);
     Log.info({ clients: clients.size }, 'WS:Connected');
+
+    if (currentGameState.seed > 0) {
+      ws.send(JSON.stringify(currentGameState), (err) => {
+        if (err) Log.warn({ err: String(err) }, 'WS:SendError');
+      });
+    }
 
     ws.on('close', () => {
       clients.delete(ws);

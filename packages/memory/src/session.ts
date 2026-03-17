@@ -1,5 +1,5 @@
 import { Diablo2State } from '@diablo2/core';
-import { Attribute, Difficulty, Diablo2Mpq, UnitType } from '@diablo2/data';
+import { ActUtil, Attribute, Difficulty, Diablo2Mpq, UnitType } from '@diablo2/data';
 import { toHex } from 'binparse';
 import { Diablo2ItemJson } from 'packages/state/build/json.js';
 import { Diablo2Process } from './d2.js';
@@ -34,6 +34,35 @@ export class Diablo2GameSessionMemory {
     this.state = new Diablo2State(id, Log);
   }
 
+  markPlayerLost(logger: LogType, reason: string, err?: unknown): void {
+    const hadTrackedPlayer = this.player != null || this.state.player.x > 0 || this.state.player.y > 0;
+    this.player = null;
+
+    const statePlayer = this.state.player;
+    let dirty = false;
+
+    if (statePlayer.x !== 0 || statePlayer.y !== 0) {
+      statePlayer.x = 0;
+      statePlayer.y = 0;
+      dirty = true;
+    }
+
+    if (this.state.units.size > 0) {
+      this.state.units.clear();
+      dirty = true;
+    }
+
+    if (this.state.items.size > 0) {
+      this.state.items.clear();
+      dirty = true;
+    }
+
+    if (dirty) this.state.dirty();
+    if (!hadTrackedPlayer) return;
+
+    logger.warn({ d2Proc: this.d2.process.pid, player: this.playerName, reason, err }, 'Player:Lost');
+  }
+
   async start(logger: LogType): Promise<void> {
     logger.info({ d2Proc: this.d2.process.pid, player: this.playerName }, 'Session:Start');
 
@@ -51,26 +80,39 @@ export class Diablo2GameSessionMemory {
         logger.error({ d2Proc: this.d2.process.pid, err }, 'Session:Error');
         errorCount++;
         await sleep(this.tickSpeed * errorCount);
-        if (errorCount > 5) break;
       }
     }
   }
 
   async waitForPlayer(logger: LogType): Promise<Diablo2Player> {
-    if (this.player) {
-      const player = await this.player.validate(logger);
-      if (player != null) return this.player;
+    const currentPlayer = this.player;
+    if (currentPlayer) {
+      let player = null;
+      try {
+        player = await currentPlayer.validate(logger);
+      } catch (err) {
+        this.markPlayerLost(logger, 'ValidateFailed', err);
+      }
+      if (player != null) return currentPlayer;
+      this.markPlayerLost(logger, 'PointerInvalid');
     }
-    // this.player = null;
+
     let backOff = 0;
     while (true) {
       logger.info({ d2Proc: this.d2.process.pid, player: this.playerName }, 'Session:WaitForPlayer');
 
       await sleep(Math.min(backOff * 500, 5_000));
       backOff++;
-      if (this.player) {
-        const player = await this.player.validate(logger);
-        if (player != null) return this.player;
+      const existingPlayer = this.player;
+      if (existingPlayer) {
+        let player = null;
+        try {
+          player = await existingPlayer.validate(logger);
+        } catch (err) {
+          this.markPlayerLost(logger, 'ValidateFailed', err);
+        }
+        if (player != null) return existingPlayer;
+        this.markPlayerLost(logger, 'PointerInvalid');
         continue;
       }
 
@@ -82,34 +124,56 @@ export class Diablo2GameSessionMemory {
 
   async updateState(obj: Diablo2Player, logger: LogType): Promise<void> {
     const startTime = process.hrtime.bigint();
-    const player = await obj.validate(logger);
+    let player = null;
+    try {
+      player = await obj.validate(logger);
+    } catch (err) {
+      this.markPlayerLost(logger, 'ValidateFailed', err);
+      return;
+    }
     // Player object is no longer validate assume game has exited
-    if (player == null) return;
+    if (player == null) {
+      this.markPlayerLost(logger, 'PointerInvalid');
+      return;
+    }
 
     const path = await obj.getPath(player, logger);
     const act = await obj.getAct(player, logger);
     const stats = await obj.getStats(player, logger);
+    const levelId = await obj.getLevelId(path, logger);
+    const currentAct = levelId > 0 ? (ActUtil.fromLevel(levelId) ?? player.actId) : player.actId;
 
     // Load ActMisc once to get both mapSeed and difficulty without double-fetching
     const actMisc = act.pActMisc.isValid
       ? await obj.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut)
       : null;
     const mapSeed = resolveMapSeed(act, actMisc, logger);
+    const mapState = this.state.map as typeof this.state.map & { levelId?: number };
 
-    this.state.map.act = player.actId;
+    let mapDirty = false;
+    if (mapState.act !== currentAct) {
+      mapState.act = currentAct;
+      mapDirty = true;
+    }
+    if (mapState.levelId !== levelId) {
+      mapState.levelId = levelId;
+      mapDirty = true;
+    }
 
     // Track map information
-    if (mapSeed !== 0 && mapSeed !== this.state.map.id) {
-      this.state.map.id = mapSeed;
-      this.state.map.difficulty = await resolveDifficulty(this.d2, actMisc, act, logger);
-      this.state.log.info({ map: this.state.map }, 'MapSeed:Changed');
+    if (mapSeed !== 0 && mapSeed !== mapState.id) {
+      mapState.id = mapSeed;
+      mapState.difficulty = await resolveDifficulty(this.d2, actMisc, act, logger);
+      this.state.log.info({ map: mapState }, 'MapSeed:Changed');
       this.state.units.clear();
       this.state.items.clear();
       this.state.kills.clear();
       this.itemIgnore.clear();
-      this.state.dirty();
-      this.onMapChange?.(mapSeed, this.state.map.difficulty, player.actId);
+      mapDirty = true;
+      this.onMapChange?.(mapSeed, mapState.difficulty, currentAct);
     }
+
+    if (mapDirty) this.state.dirty();
 
     // Track player location
     if (this.state.players.get(player.unitId) == null) {

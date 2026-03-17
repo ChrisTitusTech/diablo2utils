@@ -42,8 +42,9 @@ export interface GameState {
   seed: number;
   difficulty: number;
   act: number;
+  levelId?: number;
   updatedAt: number;
-  player?: GameStatePlayer;
+  player?: GameStatePlayer | null;
   units?: GameStateUnit[];
   items?: GameStateItem[];
   kills?: GameStateKill[];
@@ -54,13 +55,17 @@ export const currentGameState: GameState = {
   seed: 0,
   difficulty: Difficulty.Hell,
   act: Act.ActI,
+  levelId: 0,
   updatedAt: 0,
 };
 
 /** GET /v1/state — returns the current game state to the viewer */
 export class StateGetRoute implements Route<GameState> {
   url = '/v1/state';
-  async process(): Promise<GameState> {
+  async process(_req: Request, res?: Response): Promise<GameState> {
+    res?.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+    res?.setHeader('Pragma', 'no-cache');
+    res?.setHeader('Expires', '0');
     return currentGameState;
   }
 }

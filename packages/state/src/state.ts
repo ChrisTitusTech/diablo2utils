@@ -15,7 +15,7 @@ export class Diablo2GameState extends Emitter<StateEvents> {
     this.state = {
       id,
       createdAt: Date.now(),
-      map: { act: 0, difficulty: 0, id: 0, isHardcore: true },
+      map: { act: 0, difficulty: 0, id: 0, levelId: 0, isHardcore: true },
       player: {
         id: -1,
         x: 0,

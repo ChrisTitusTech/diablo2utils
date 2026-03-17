@@ -1,25 +1,111 @@
 import { Act, ActUtil, Difficulty, DifficultyUtil } from '@diablo2/data';
 import { toHex } from 'binparse/build/src/hex.js';
-import { LevelBounds, MapLocation } from './bounds.js';
+import { LevelBounds } from './bounds.js';
 import { MapLayers } from './map.objects.js';
 import { registerMapProtocols } from './map.protocol.js';
 import { Diablo2GameState } from '@diablo2/state';
 import { toFeatureCollection } from '@linzjs/geojson';
+import { Diablo2MapTiles } from './tile.js';
 import { GameStateWsClient } from './ws.client.js';
 
 declare const maplibregl: any;
 
+type ViewerStateSource = 'ws' | 'http';
+type DebugConsoleLevel = 'info' | 'warn' | 'error';
+
+interface ViewerDebugEvent {
+  time: number;
+  kind: string;
+  message: string;
+  details?: unknown;
+}
+
+interface MapFetchDebugDetail {
+  phase: 'start' | 'success' | 'error';
+  url: string;
+  path: string;
+  seed: number;
+  difficulty: number;
+  act: number;
+  levelId?: number;
+  status?: number;
+  statusText?: string;
+  error?: string;
+  levelCount?: number;
+  occurredAt: number;
+}
+
 export class Diablo2MapViewer {
   map: any;
+  debugWindow: Window | null = null;
 
   color = 'white';
-  updateUrlTimer: unknown;
   ctx: Diablo2GameState;
+  hasPlayer = false;
+  playerStatus = 'Waiting for player';
 
   /** Zoom level to switch to when the player is centered, nullish to turn off */
   stateZoom = 7;
   /** Should the map follow the player */
   centerOnPlayer = true;
+  debugMaxEvents = 60;
+  debugEvents: ViewerDebugEvent[] = [];
+  debugState = {
+    ws: { status: 'connecting', url: '', connectedAt: 0, disconnectedAt: 0, lastMessageAt: 0, messages: 0, lastError: '' },
+    http: { lastPollAt: 0, lastSuccessAt: 0, successCount: 0, failureCount: 0, lastError: '', lastStatus: 0 },
+    server: {
+      source: 'http' as ViewerStateSource,
+      receivedAt: 0,
+      updatedAt: 0,
+      seed: 0,
+      difficulty: 0,
+      act: 0,
+      resolvedAct: 0,
+      reportedLevelId: 0,
+      playerName: '',
+      playerX: 0,
+      playerY: 0,
+      playerLife: 0,
+      hasPlayer: false,
+    },
+    viewer: {
+      seed: 0,
+      difficulty: 0,
+      act: 0,
+      levelId: 0,
+      playerX: 0,
+      playerY: 0,
+      hasPlayer: false,
+      zoom: 0,
+      mapUrl: '',
+    },
+    reconcile: {
+      requestedAt: 0,
+      resolvedAt: 0,
+      reportedLevelId: 0,
+      reportedLevelName: '',
+      inferredLevelId: 0,
+      inferredLevelName: '',
+      selectedLevelId: 0,
+      selectedLevelName: '',
+      act: 0,
+      requestKey: '',
+      error: '',
+    },
+    mapFetch: {
+      lastStartedAt: 0,
+      lastFinishedAt: 0,
+      okCount: 0,
+      errorCount: 0,
+      lastUrl: '',
+      lastPath: '',
+      lastStatus: 0,
+      lastError: '',
+      lastLevelCount: 0,
+    },
+    issues: [] as string[],
+  };
+  lastIssueSignature = '';
 
   constructor(el: string) {
     this.ctx = new Diablo2GameState('');
@@ -42,20 +128,32 @@ export class Diablo2MapViewer {
     });
 
     (window as any).map = this.map;
+    this.installDebugHooks();
+    this.recordDebugEvent('viewer:init', 'Viewer initialized', { container: el });
 
     this.map.on('load', () => {
       this.map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'top-right');
       this.trackDom();
       this.updateFromUrl();
       this.update();
-      this.map.on('render', this.render);
       this.startWebSocket();
       this.startStatePolling();
+    });
+
+    this.map.on('error', (event: any) => {
+      const error = event?.error instanceof Error ? event.error.message : event?.error ?? 'Unknown map error';
+      this.recordDebugEvent('map:error', 'MapLibre reported an error', { error }, 'error');
     });
   }
 
   /** WebSocket client for real-time state updates from the map server */
   wsClient: GameStateWsClient | null = null;
+
+  /** Poll the map server for game state updates pushed by the memory reader */
+  stateTimer: unknown;
+  lastStateUpdatedAt = 0;
+  pendingLevelResolveKey = '';
+  lastUrl: string | null = null;
 
   /**
    * Create a canvas-based arrow image and register it with the map
@@ -69,21 +167,18 @@ export class Diablo2MapViewer {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Draw arrow pointing up (north)
     const cx = size / 2;
     ctx.clearRect(0, 0, size, size);
 
-    // Outer stroke
     ctx.beginPath();
-    ctx.moveTo(cx, 4);           // top point
-    ctx.lineTo(cx + 16, size - 8); // bottom-right
-    ctx.lineTo(cx, size - 16);     // notch
-    ctx.lineTo(cx - 16, size - 8); // bottom-left
+    ctx.moveTo(cx, 4);
+    ctx.lineTo(cx + 16, size - 8);
+    ctx.lineTo(cx, size - 16);
+    ctx.lineTo(cx - 16, size - 8);
     ctx.closePath();
     ctx.fillStyle = '#000000';
     ctx.fill();
 
-    // Inner fill — bright green
     ctx.beginPath();
     ctx.moveTo(cx, 7);
     ctx.lineTo(cx + 13, size - 10);
@@ -97,171 +192,261 @@ export class Diablo2MapViewer {
     this.map.addImage('player-arrow', { width: size, height: size, data: imageData.data });
   }
 
-  /**
-   * Connect to the map server's WebSocket endpoint for real-time game state.
-   * Falls back to HTTP polling when WS is unavailable.
-   */
   startWebSocket(): void {
+    this.debugState.ws.url = this.getWebSocketUrl();
     this.wsClient = new GameStateWsClient({
-      onState: (state) => this.handleStateUpdate(state),
+      onState: (state) => this.handleStateUpdate(state, 'ws'),
+      onOpen: () => {
+        this.debugState.ws.status = 'open';
+        this.debugState.ws.connectedAt = Date.now();
+        this.debugState.ws.lastError = '';
+        this.recordDebugEvent('ws:open', 'WebSocket connected', { url: this.debugState.ws.url }, 'info');
+      },
+      onClose: () => {
+        this.debugState.ws.status = 'closed';
+        this.debugState.ws.disconnectedAt = Date.now();
+        this.recordDebugEvent('ws:close', 'WebSocket disconnected', { url: this.debugState.ws.url }, 'warn');
+      },
+      onError: () => {
+        this.debugState.ws.status = 'error';
+        this.debugState.ws.lastError = 'WebSocket error';
+        this.recordDebugEvent('ws:error', 'WebSocket error', { url: this.debugState.ws.url }, 'warn');
+      },
+      onMessage: () => {
+        this.debugState.ws.messages += 1;
+        this.debugState.ws.lastMessageAt = Date.now();
+      },
     });
   }
 
-  /**
-   * Handle incoming state from either WebSocket or HTTP polling.
-   * Updates map/act/difficulty if changed, and refreshes player/units/items.
-   */
-  handleStateUpdate(state: any): void {
-    if (!state || state.seed <= 0) return;
+  handleStateUpdate(state: any, source: ViewerStateSource = 'ws'): void {
+    if (!state) return;
+    if (state.seed <= 0) {
+      const invalidHasPlayer = !!state.player && state.player.x > 0 && state.player.y > 0;
+      this.debugState.server = {
+        source,
+        receivedAt: Date.now(),
+        updatedAt: state.updatedAt ?? 0,
+        seed: state.seed ?? 0,
+        difficulty: state.difficulty ?? this.debugState.server.difficulty ?? 0,
+        act: state.act ?? this.debugState.server.act ?? 0,
+        resolvedAct: state.act ?? this.debugState.server.resolvedAct ?? 0,
+        reportedLevelId: state.levelId ?? 0,
+        playerName: state.player?.name ?? this.debugState.server.playerName,
+        playerX: state.player?.x ?? 0,
+        playerY: state.player?.y ?? 0,
+        playerLife: state.player?.life ?? 0,
+        hasPlayer: invalidHasPlayer,
+      };
+      this.recordDebugEvent(
+        'state:invalid-seed',
+        `Ignoring ${source.toUpperCase()} state with invalid seed`,
+        {
+          seed: state.seed,
+          updatedAt: state.updatedAt ?? 0,
+          act: state.act ?? 0,
+          difficulty: state.difficulty ?? 0,
+        },
+      );
+      this.refreshViewerDebugState();
+      this.evaluateSyncIssues();
+      this.updateDebugDom();
+      return;
+    }
     if (state.updatedAt <= this.lastStateUpdatedAt) return;
 
     this.lastStateUpdatedAt = state.updatedAt;
     const map = this.ctx.state.map;
+    const nextLevelId = state.levelId ?? 0;
+    const nextAct = nextLevelId > 0 ? (ActUtil.fromLevel(nextLevelId) ?? state.act) : state.act;
     const changed =
       map.id !== state.seed ||
-      map.act !== state.act ||
-      map.difficulty !== state.difficulty;
+      map.act !== nextAct ||
+      map.difficulty !== state.difficulty ||
+      (map.levelId ?? 0) !== nextLevelId;
 
     if (changed) {
       map.id = state.seed;
-      map.act = state.act ?? map.act;
+      map.act = nextAct ?? map.act;
       map.difficulty = state.difficulty ?? map.difficulty;
+      map.levelId = nextLevelId;
     }
 
-    // Apply player position
-    if (state.player && state.player.x > 0) {
+    const hasPlayer = !!state.player && state.player.x > 0 && state.player.y > 0;
+    const previousHasPlayer = this.hasPlayer;
+    this.hasPlayer = hasPlayer;
+    this.playerStatus = hasPlayer
+      ? `Following ${state.player.name || this.ctx.state.player.name || 'player'}`
+      : 'Waiting for player';
+
+    this.debugState.server = {
+      source,
+      receivedAt: Date.now(),
+      updatedAt: state.updatedAt ?? 0,
+      seed: state.seed ?? 0,
+      difficulty: state.difficulty ?? 0,
+      act: state.act ?? 0,
+      resolvedAct: nextAct ?? state.act ?? 0,
+      reportedLevelId: nextLevelId,
+      playerName: state.player?.name ?? '',
+      playerX: state.player?.x ?? 0,
+      playerY: state.player?.y ?? 0,
+      playerLife: state.player?.life ?? 0,
+      hasPlayer,
+    };
+
+    if (hasPlayer) {
       this.ctx.state.player.x = state.player.x;
       this.ctx.state.player.y = state.player.y;
       if (state.player.name) this.ctx.state.player.name = state.player.name;
       if (state.player.level) this.ctx.state.player.level = state.player.level;
       if (state.player.life != null) this.ctx.state.player.life = state.player.life;
+    } else {
+      this.ctx.state.player.x = 0;
+      this.ctx.state.player.y = 0;
     }
 
-    // Apply units and items
-    if (Array.isArray(state.units)) {
-      this.ctx.state.units = state.units;
+    this.ctx.state.units = Array.isArray(state.units) && hasPlayer ? state.units : [];
+    this.ctx.state.items = Array.isArray(state.items) && hasPlayer ? state.items : [];
+
+    if (changed) {
+      this.recordDebugEvent(
+        'state:map',
+        `Viewer map updated from ${source.toUpperCase()} state`,
+        {
+          seed: state.seed > 0 ? toHex(state.seed, 8) : 'n/a',
+          difficulty: this.formatDifficulty(state.difficulty),
+          serverAct: this.formatAct(state.act),
+          resolvedAct: this.formatAct(nextAct),
+          reportedLevelId: nextLevelId,
+        },
+        'info',
+      );
     }
-    if (Array.isArray(state.items)) {
-      this.ctx.state.items = state.items;
+
+    if (previousHasPlayer !== hasPlayer) {
+      this.recordDebugEvent(
+        'state:player',
+        hasPlayer ? 'Player position acquired' : 'Player missing from current state',
+        { name: state.player?.name ?? this.ctx.state.player.name, x: state.player?.x ?? 0, y: state.player?.y ?? 0 },
+        hasPlayer ? 'info' : 'warn',
+      );
     }
 
     this.update();
+    void this.reconcileLevelId(state);
   }
 
-  /** Poll the map server for game state updates pushed by the memory reader */
-  stateTimer: unknown;
-  lastStateUpdatedAt = 0;
+  async reconcileLevelId(state: any): Promise<void> {
+    if (!state?.player || state.player.x <= 0 || state.player.y <= 0) return;
+
+    const reportedLevelId = state.levelId ?? 0;
+    const act = reportedLevelId > 0 ? (ActUtil.fromLevel(reportedLevelId) ?? state.act) : state.act;
+    const requestKey = [state.seed, state.difficulty, act, state.player.x, state.player.y, state.updatedAt].join('__');
+    this.pendingLevelResolveKey = requestKey;
+    this.debugState.reconcile.requestedAt = Date.now();
+    this.debugState.reconcile.requestKey = requestKey;
+    this.debugState.reconcile.act = act;
+    this.debugState.reconcile.reportedLevelId = reportedLevelId;
+    this.debugState.reconcile.reportedLevelName = this.formatLevelLabel(reportedLevelId);
+    this.debugState.reconcile.error = '';
+
+    try {
+      const map = await Diablo2MapTiles.get(state.difficulty, state.seed, act);
+      if (this.pendingLevelResolveKey !== requestKey) return;
+
+      const inferredLevel = map.findLevelAtPoint(act, state.player.x, state.player.y, reportedLevelId);
+      this.debugState.reconcile.resolvedAt = Date.now();
+
+      if (inferredLevel == null) {
+        this.debugState.reconcile.inferredLevelId = 0;
+        this.debugState.reconcile.inferredLevelName = 'No containing level found';
+        this.evaluateSyncIssues();
+        return;
+      }
+
+      this.debugState.reconcile.inferredLevelId = inferredLevel.id;
+      this.debugState.reconcile.inferredLevelName = inferredLevel.name ?? this.formatLevelLabel(inferredLevel.id);
+
+      const currentLevelId = this.ctx.state.map.levelId ?? 0;
+      if (currentLevelId === inferredLevel.id) {
+        this.debugState.reconcile.selectedLevelId = currentLevelId;
+        this.debugState.reconcile.selectedLevelName = inferredLevel.name ?? this.formatLevelLabel(currentLevelId);
+        this.evaluateSyncIssues();
+        return;
+      }
+
+      this.ctx.state.map.levelId = inferredLevel.id;
+      this.debugState.reconcile.selectedLevelId = inferredLevel.id;
+      this.debugState.reconcile.selectedLevelName = inferredLevel.name ?? this.formatLevelLabel(inferredLevel.id);
+      this.recordDebugEvent(
+        'reconcile:level',
+        'Viewer level corrected using player coordinates',
+        {
+          reportedLevelId,
+          inferredLevelId: inferredLevel.id,
+          inferredLevelName: inferredLevel.name,
+          player: { x: state.player.x, y: state.player.y },
+        },
+        reportedLevelId === inferredLevel.id ? 'info' : 'warn',
+      );
+      this.update();
+    } catch (err) {
+      this.debugState.reconcile.error = err instanceof Error ? err.message : String(err);
+      this.recordDebugEvent('reconcile:error', 'Level reconciliation failed', { error: this.debugState.reconcile.error }, 'warn');
+    } finally {
+      this.evaluateSyncIssues();
+    }
+  }
 
   startStatePolling(): void {
     const poll = async (): Promise<void> => {
+      this.debugState.http.lastPollAt = Date.now();
       try {
-        const res = await fetch('/v1/state');
-        if (!res.ok) return;
+        const res = await fetch('/v1/state', { cache: 'no-store' });
+        this.debugState.http.lastStatus = res.status;
+        if (!res.ok) {
+          this.debugState.http.failureCount += 1;
+          this.debugState.http.lastError = `HTTP ${res.status} ${res.statusText}`;
+          this.recordDebugEvent('http:error', 'State polling failed', { status: res.status, statusText: res.statusText }, 'warn');
+          return;
+        }
         const state = await res.json();
-        this.handleStateUpdate(state);
-      } catch {
-        // server unreachable — ignore
+        this.debugState.http.successCount += 1;
+        this.debugState.http.lastSuccessAt = Date.now();
+        this.debugState.http.lastError = '';
+        this.handleStateUpdate(state, 'http');
+      } catch (err) {
+        this.debugState.http.failureCount += 1;
+        this.debugState.http.lastError = err instanceof Error ? err.message : String(err);
+        this.recordDebugEvent('http:error', 'State polling threw an error', { error: this.debugState.http.lastError }, 'warn');
       }
     };
-    // HTTP polling is a slower fallback; WebSocket handles the real-time path
+
     this.stateTimer = setInterval(poll, 5000);
-    // Also run immediately so the viewer picks up the current state on load
     poll();
-  }
-
-  /**
-   * Support parsing of zooms, pitches, bearings with `z14` or `14z`, etc
-   * @param value string to parse value from
-   * @param prefixSuffix prefix or suffix for the map property
-   */
-  parseMapControlValue(value: string | null, prefixSuffix: string): number {
-    if (value == null || value === '') return NaN;
-    if (value.startsWith(prefixSuffix)) return parseFloat(value.slice(1));
-    if (value.endsWith(prefixSuffix)) return parseFloat(value);
-    return NaN;
-  }
-
-  /** Parse a location from window.hash if it exists */
-  fromHash(str: string): Partial<MapLocation> {
-    const output: Partial<MapLocation> = {};
-    const hash = str.replace('#@', '');
-    const [latS, lonS, zoomS, pitchS, bearingS] = hash.split(',');
-    const lat = parseFloat(latS);
-    const lon = parseFloat(lonS);
-    if (!isNaN(lat) && !isNaN(lon)) {
-      output.lat = lat;
-      output.lon = lon;
-    }
-
-    const newZoom = this.parseMapControlValue(zoomS, 'z');
-    if (!isNaN(newZoom)) {
-      output.zoom = newZoom;
-    }
-
-    const newPitch = this.parseMapControlValue(pitchS, 'p');
-    if (!isNaN(newPitch)) {
-      output.pitch = newPitch;
-    }
-
-    const newBearing = this.parseMapControlValue(bearingS, 'b');
-    if (!isNaN(newBearing)) {
-      output.bearing = newBearing;
-    }
-
-    return output;
   }
 
   updateFromUrl(): void {
     const urlParams = new URLSearchParams(window.location.search);
-    const state = this.ctx.state;
-    state.map.id = Number(urlParams.get('seed'));
-    if (isNaN(state.map.id) || state.map.id <= 0) state.map.id = 0x00ff00ff;
-    state.map.act = ActUtil.fromString(urlParams.get('act')) ?? Act.ActI;
-    state.map.difficulty = DifficultyUtil.fromString(urlParams.get('difficulty')) ?? Difficulty.Normal;
     this.color = urlParams.get('color') || 'white';
-
-    if (window.location.hash == null) return;
-
-    const location = this.fromHash(window.location.hash);
-    if (location.zoom) this.map.setZoom(location.zoom);
-    if (location.pitch) this.map.setPitch(location.pitch);
-    if (location.bearing) this.map.setBearing(location.bearing);
-    if (location.lat) this.map.setCenter(location);
   }
-
-  updateUrl(): void {
-    const state = this.ctx.state;
-
-    const urlParams = new URLSearchParams(window.location.search);
-    urlParams.set('seed', toHex(state.map.id, 8));
-    urlParams.set('act', Act[state.map.act]);
-    urlParams.set('difficulty', Difficulty[state.map.difficulty]);
-    urlParams.set('color', this.color);
-    const center = this.map.getCenter();
-    if (center == null) throw new Error('Invalid Map location');
-    const zoom = Math.floor((this.map.getZoom() ?? 0) * 10e3) / 10e3;
-    const pitch = Math.floor((this.map.getPitch() ?? 0) * 10e3) / 10e3;
-    const bearing = Math.floor((this.map.getBearing() ?? 0) * 10e3) / 10e3;
-
-    window.history.replaceState(
-      null,
-      '',
-      '?' + urlParams.toString() + `#@${center.lat.toFixed(7)},${center.lng.toFixed(7)},z${zoom},p${pitch},b${bearing}`,
-    );
-    this.updateUrlTimer = null;
-  }
-
-  render = (): void => {
-    if (this.updateUrlTimer != null) return;
-    this.updateUrlTimer = setTimeout(() => this.updateUrl(), 1000);
-  };
-
-  lastUrl: string | null;
 
   updateMapStyles(): void {
     const state = this.ctx.state;
     const map = state.map;
-    const d2Url = `${toHex(map.id, 8)}/${Difficulty[map.difficulty]}/${Act[map.act]}/{z}/{x}/{y}/${this.color}`;
+    const hasValidSeed = Number.isFinite(map.id) && map.id > 0;
+    const hasValidDifficulty = Difficulty[map.difficulty] != null;
+    const hasValidAct = Act[map.act] != null;
+
+    if (!hasValidSeed || !hasValidDifficulty || !hasValidAct) {
+      this.debugState.viewer.mapUrl = '';
+      return;
+    }
+
+    const levelSuffix = (map.levelId ?? 0) > 0 ? `/${map.levelId}` : '';
+    const d2Url = `${toHex(map.id, 8)}/${Difficulty[map.difficulty]}/${Act[map.act]}${levelSuffix}/{z}/{x}/{y}/${this.color}`;
+    this.debugState.viewer.mapUrl = d2Url;
 
     if (this.lastUrl === d2Url) return;
     this.lastUrl = d2Url;
@@ -288,15 +473,15 @@ export class Diablo2MapViewer {
       this.map.addLayer(layer);
     }
   }
+
   update(): void {
-    // console.log('Diablo2MapViewer.update()');
-    this.updateUrl();
+    this.refreshViewerDebugState();
     this.updateDom();
     this.updateMapStyles();
+    this.evaluateSyncIssues();
 
     const state = this.ctx.state;
 
-    // State Update
     if (state.player.x > 0) {
       const { lng, lat } = LevelBounds.sourceToLatLng(state.player.x, state.player.y);
       if (this.centerOnPlayer) {
@@ -311,28 +496,22 @@ export class Diablo2MapViewer {
       const features = [playerJson];
       for (const unit of state.units) {
         const { lng, lat } = LevelBounds.sourceToLatLng(unit.x, unit.y);
-
-        const unitJson: GeoJSON.Feature = {
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [lng, lat] },
-          properties: unit,
-        };
-        features.push(unitJson);
+        features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: unit });
       }
 
       for (const item of state.items) {
         const { lng, lat } = LevelBounds.sourceToLatLng(item.x, item.y);
-        const itemJson: GeoJSON.Feature = {
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [lng, lat] },
-          properties: item,
-        };
-        features.push(itemJson);
+        features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] }, properties: item });
       }
       const playerSource = this.map.getSource('game-state');
       if (playerSource == null) {
         this.map.addSource('game-state', { type: 'geojson', data: toFeatureCollection(features) });
       } else playerSource.setData(toFeatureCollection(features));
+    } else {
+      const playerSource = this.map.getSource('game-state');
+      if (playerSource == null) {
+        this.map.addSource('game-state', { type: 'geojson', data: toFeatureCollection([]) });
+      } else playerSource.setData(toFeatureCollection([]));
     }
   }
 
@@ -340,6 +519,7 @@ export class Diablo2MapViewer {
     const act = ActUtil.fromString(a);
     if (act == null || this.ctx.state.map.act === act) return;
     this.ctx.state.map.act = act;
+    this.recordDebugEvent('viewer:act', 'Act changed from viewer controls', { act: this.formatAct(act) }, 'info');
     this.update();
   }
 
@@ -347,6 +527,7 @@ export class Diablo2MapViewer {
     const difficulty = DifficultyUtil.fromString(a);
     if (difficulty == null || this.ctx.state.map.difficulty === difficulty) return;
     this.ctx.state.map.difficulty = difficulty;
+    this.recordDebugEvent('viewer:difficulty', 'Difficulty changed from viewer controls', { difficulty: this.formatDifficulty(difficulty) }, 'info');
     this.update();
   }
 
@@ -358,6 +539,14 @@ export class Diablo2MapViewer {
     document
       .querySelectorAll<HTMLButtonElement>('button.options__difficulty')
       .forEach((f) => f.addEventListener('click', (): void => this.setDifficulty(f.value)));
+
+    document
+      .querySelectorAll<HTMLButtonElement>('button.options__debug')
+      .forEach((f) =>
+        f.addEventListener('click', (): void => {
+          this.openDebugWindow();
+        }),
+      );
   }
 
   updateDom(): void {
@@ -373,8 +562,14 @@ export class Diablo2MapViewer {
       }
     });
 
-    const seed = document.querySelector('.options__seed') as HTMLDivElement;
+    const seed = document.querySelector('.options__seed') as HTMLDivElement | null;
     if (seed) seed.innerText = toHex(state.map.id, 8);
+
+    const playerStatus = document.querySelector('.options__player-status') as HTMLSpanElement | null;
+    if (playerStatus) {
+      playerStatus.innerText = this.playerStatus;
+      playerStatus.dataset.state = this.hasPlayer ? 'live' : 'waiting';
+    }
 
     const difficulties = document.querySelectorAll('button.options__difficulty') as NodeListOf<HTMLButtonElement>;
     difficulties.forEach((f: HTMLButtonElement) => {
@@ -386,5 +581,347 @@ export class Diablo2MapViewer {
         f.classList.add('button-clear');
       }
     });
+
+    this.updateDebugDom();
+  }
+
+  installDebugHooks(): void {
+    window.addEventListener('d2:map-fetch', this.handleMapFetchDebug as EventListener);
+    (window as any).D2ViewerDebug = {
+      getSnapshot: () => this.buildDebugSnapshot(),
+      getEvents: () => this.debugEvents.slice(),
+      dump: () => {
+        const snapshot = this.buildDebugSnapshot();
+        console.log('[D2ViewerDebug] snapshot', snapshot);
+        return snapshot;
+      },
+    };
+  }
+
+  handleMapFetchDebug = (event: Event): void => {
+    const detail = (event as CustomEvent<MapFetchDebugDetail>).detail;
+    if (!detail) return;
+
+    this.debugState.mapFetch.lastUrl = detail.url;
+    this.debugState.mapFetch.lastPath = detail.path;
+
+    if (detail.phase === 'start') {
+      this.debugState.mapFetch.lastStartedAt = detail.occurredAt;
+      this.recordDebugEvent('map-fetch:start', 'Map JSON fetch started', detail);
+      return;
+    }
+
+    if (detail.phase === 'success') {
+      this.debugState.mapFetch.lastFinishedAt = detail.occurredAt;
+      this.debugState.mapFetch.okCount += 1;
+      this.debugState.mapFetch.lastStatus = detail.status ?? 0;
+      this.debugState.mapFetch.lastError = '';
+      this.debugState.mapFetch.lastLevelCount = detail.levelCount ?? 0;
+      this.recordDebugEvent('map-fetch:success', 'Map JSON fetch completed', detail);
+      return;
+    }
+
+    this.debugState.mapFetch.lastFinishedAt = detail.occurredAt;
+    this.debugState.mapFetch.errorCount += 1;
+    this.debugState.mapFetch.lastStatus = detail.status ?? 0;
+    this.debugState.mapFetch.lastError = detail.error ?? '';
+    this.recordDebugEvent('map-fetch:error', 'Map JSON fetch failed', detail, 'warn');
+  };
+
+  recordDebugEvent(kind: string, message: string, details?: unknown, consoleLevel: DebugConsoleLevel | null = null): void {
+    this.debugEvents.unshift({ time: Date.now(), kind, message, details });
+    if (this.debugEvents.length > this.debugMaxEvents) this.debugEvents.length = this.debugMaxEvents;
+
+    if (consoleLevel === 'error') console.error('[D2ViewerDebug]', message, details ?? '');
+    else if (consoleLevel === 'warn') console.warn('[D2ViewerDebug]', message, details ?? '');
+    else if (consoleLevel === 'info') console.info('[D2ViewerDebug]', message, details ?? '');
+  }
+
+  refreshViewerDebugState(): void {
+    const state = this.ctx.state;
+    this.debugState.viewer.seed = state.map.id;
+    this.debugState.viewer.difficulty = state.map.difficulty;
+    this.debugState.viewer.act = state.map.act;
+    this.debugState.viewer.levelId = state.map.levelId ?? 0;
+    this.debugState.viewer.playerX = state.player.x;
+    this.debugState.viewer.playerY = state.player.y;
+    this.debugState.viewer.hasPlayer = state.player.x > 0 && state.player.y > 0;
+    this.debugState.viewer.zoom = typeof this.map?.getZoom === 'function' ? Number(this.map.getZoom().toFixed(2)) : 0;
+  }
+
+  evaluateSyncIssues(): void {
+    const issues: string[] = [];
+    const server = this.debugState.server;
+    const viewer = this.debugState.viewer;
+    const reconcile = this.debugState.reconcile;
+    const now = Date.now();
+
+    if (server.seed > 0 && viewer.seed > 0 && server.seed !== viewer.seed) {
+      issues.push(`Seed mismatch: server=${toHex(server.seed, 8)} viewer=${toHex(viewer.seed, 8)}`);
+    }
+    if (server.seed > 0 && viewer.difficulty !== server.difficulty) {
+      issues.push(`Difficulty mismatch: server=${this.formatDifficulty(server.difficulty)} viewer=${this.formatDifficulty(viewer.difficulty)}`);
+    }
+    if (server.seed > 0 && viewer.act !== server.resolvedAct) {
+      issues.push(`Act mismatch: server=${this.formatAct(server.resolvedAct)} viewer=${this.formatAct(viewer.act)}`);
+    }
+    if (server.reportedLevelId > 0 && reconcile.inferredLevelId > 0 && server.reportedLevelId !== reconcile.inferredLevelId) {
+      issues.push(`Level mismatch: reported=${server.reportedLevelId} inferred=${reconcile.inferredLevelId}`);
+    }
+    if (reconcile.inferredLevelId > 0 && viewer.levelId > 0 && viewer.levelId !== reconcile.inferredLevelId) {
+      issues.push(`Viewer level drift: viewer=${viewer.levelId} inferred=${reconcile.inferredLevelId}`);
+    }
+    if (server.updatedAt > 0 && now - server.updatedAt > 5000) {
+      issues.push(`Server state is stale (${this.formatAge(server.updatedAt)})`);
+    }
+    if (this.debugState.ws.status !== 'open') {
+      issues.push('WebSocket disconnected — relying on HTTP polling');
+    }
+    if (!server.hasPlayer) {
+      issues.push('No player coordinates in the latest server state');
+    }
+    if (this.debugState.mapFetch.lastError) {
+      issues.push(`Last map fetch failed: ${this.debugState.mapFetch.lastError}`);
+    }
+    if (reconcile.error) {
+      issues.push(`Reconcile error: ${reconcile.error}`);
+    }
+
+    this.debugState.issues = issues;
+    const signature = issues.join('|');
+    if (signature !== this.lastIssueSignature) {
+      this.lastIssueSignature = signature;
+      if (issues.length === 0) this.recordDebugEvent('sync:ok', 'Viewer and server state are in sync');
+      else this.recordDebugEvent('sync:issues', 'Sync diagnostics changed', { issues }, 'warn');
+    }
+  }
+
+  buildDebugSnapshot(): Record<string, unknown> {
+    return {
+      server: {
+        ...this.debugState.server,
+        seedHex: this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : '0x00000000',
+        difficultyLabel: this.formatDifficulty(this.debugState.server.difficulty),
+        actLabel: this.formatAct(this.debugState.server.resolvedAct),
+      },
+      viewer: {
+        ...this.debugState.viewer,
+        seedHex: this.debugState.viewer.seed > 0 ? toHex(this.debugState.viewer.seed, 8) : '0x00000000',
+        difficultyLabel: this.formatDifficulty(this.debugState.viewer.difficulty),
+        actLabel: this.formatAct(this.debugState.viewer.act),
+      },
+      ws: this.debugState.ws,
+      http: this.debugState.http,
+      reconcile: this.debugState.reconcile,
+      mapFetch: this.debugState.mapFetch,
+      issues: this.debugState.issues.slice(),
+      recentEvents: this.debugEvents.slice(0, 20),
+    };
+  }
+
+  updateDebugDom(): void {
+    this.updateDebugDocument(document);
+
+    const debugWindow = this.debugWindow;
+    if (!debugWindow || debugWindow.closed) {
+      this.debugWindow = null;
+      return;
+    }
+
+    try {
+      this.updateDebugDocument(debugWindow.document);
+    } catch (err) {
+      this.recordDebugEvent('debug:popup-error', 'Failed to update debug popup', { error: err instanceof Error ? err.message : String(err) }, 'warn');
+      this.debugWindow = null;
+    }
+  }
+
+  updateDebugDocument(doc: Document): void {
+    const summary = doc.querySelector('.debug-panel__summary') as HTMLDivElement | null;
+    if (summary) {
+      summary.innerText = this.debugState.issues[0] ?? 'Viewer and D2R state are in sync';
+      summary.dataset.state = this.debugState.issues.length > 0 ? 'warning' : 'ok';
+    }
+
+    const serverEl = doc.querySelector('.debug-panel__server') as HTMLPreElement | null;
+    if (serverEl) {
+      serverEl.textContent = [
+        `source      ${this.debugState.server.source.toUpperCase()} (${this.formatAge(this.debugState.server.receivedAt)})`,
+        `updatedAt    ${this.formatTimestamp(this.debugState.server.updatedAt)} (${this.formatAge(this.debugState.server.updatedAt)})`,
+        `seed         ${this.debugState.server.seed > 0 ? toHex(this.debugState.server.seed, 8) : 'n/a'}`,
+        `difficulty   ${this.formatDifficulty(this.debugState.server.difficulty)}`,
+        `act          raw=${this.formatAct(this.debugState.server.act)} resolved=${this.formatAct(this.debugState.server.resolvedAct)}`,
+        `level        reported=${this.debugState.server.reportedLevelId || 'n/a'} ${this.formatLevelLabel(this.debugState.server.reportedLevelId)}`,
+        `player       ${this.debugState.server.playerName || 'n/a'} @ (${this.debugState.server.playerX}, ${this.debugState.server.playerY})`,
+        `life         ${this.debugState.server.playerLife || 0}`,
+      ].join('\n');
+    }
+
+    const viewerEl = doc.querySelector('.debug-panel__viewer') as HTMLPreElement | null;
+    if (viewerEl) {
+      viewerEl.textContent = [
+        `seed         ${this.debugState.viewer.seed > 0 ? toHex(this.debugState.viewer.seed, 8) : 'n/a'}`,
+        `difficulty   ${this.formatDifficulty(this.debugState.viewer.difficulty)}`,
+        `act          ${this.formatAct(this.debugState.viewer.act)}`,
+        `level        ${this.debugState.viewer.levelId || 'n/a'} ${this.formatLevelLabel(this.debugState.viewer.levelId)}`,
+        `player       ${this.debugState.viewer.hasPlayer ? 'tracked' : 'waiting'} @ (${this.debugState.viewer.playerX}, ${this.debugState.viewer.playerY})`,
+        `zoom         ${this.debugState.viewer.zoom}`,
+        `style url    ${this.debugState.viewer.mapUrl || 'n/a'}`,
+      ].join('\n');
+    }
+
+    const syncEl = doc.querySelector('.debug-panel__sync') as HTMLPreElement | null;
+    if (syncEl) {
+      const issues = this.debugState.issues.length > 0 ? this.debugState.issues.map((issue) => `- ${issue}`).join('\n') : '- none';
+      syncEl.textContent = [
+        `ws           ${this.debugState.ws.status} msgs=${this.debugState.ws.messages} last=${this.formatAge(this.debugState.ws.lastMessageAt)}`,
+        `http         ok=${this.debugState.http.successCount} fail=${this.debugState.http.failureCount} last=${this.formatAge(this.debugState.http.lastSuccessAt)}`,
+        `reconcile    reported=${this.debugState.reconcile.reportedLevelId || 'n/a'} inferred=${this.debugState.reconcile.inferredLevelId || 'n/a'} selected=${this.debugState.reconcile.selectedLevelId || 'n/a'}`,
+        `reconcile    ${this.debugState.reconcile.reportedLevelName || 'n/a'} -> ${this.debugState.reconcile.inferredLevelName || 'n/a'} -> ${this.debugState.reconcile.selectedLevelName || 'n/a'}`,
+        `map fetch    ok=${this.debugState.mapFetch.okCount} fail=${this.debugState.mapFetch.errorCount} last=${this.debugState.mapFetch.lastPath || 'n/a'}`,
+        `issues`,
+        issues,
+      ].join('\n');
+    }
+
+    const eventsEl = doc.querySelector('.debug-panel__events') as HTMLPreElement | null;
+    if (eventsEl) {
+      eventsEl.textContent = this.debugEvents
+        .slice(0, 14)
+        .map((event) => `[${new Date(event.time).toLocaleTimeString()}] ${event.kind} ${event.message}`)
+        .join('\n');
+    }
+  }
+
+  openDebugWindow(): void {
+    const existing = this.debugWindow;
+    if (existing && !existing.closed) {
+      existing.focus();
+      this.updateDebugDocument(existing.document);
+      return;
+    }
+
+    const popup = window.open('', 'd2-viewer-debug', 'popup=yes,width=980,height=760,resizable=yes,scrollbars=yes');
+    if (!popup) {
+      this.recordDebugEvent('debug:popup-blocked', 'Debug popup was blocked by the browser', undefined, 'warn');
+      return;
+    }
+
+    this.debugWindow = popup;
+    popup.document.open();
+    popup.document.write(this.buildDebugWindowHtml());
+    popup.document.close();
+    popup.focus();
+    this.recordDebugEvent('debug:popup-open', 'Opened debug popup window');
+    this.updateDebugDocument(popup.document);
+  }
+
+  buildDebugWindowHtml(): string {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Viewer Debug Output</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: 'Roboto Condensed', Arial, sans-serif;
+      background: #0e1318;
+      color: #d7e3f4;
+    }
+    h1 {
+      margin: 0 0 12px;
+      font-size: 2.8rem;
+      color: #f7fafc;
+    }
+    .debug-panel__summary {
+      font-weight: bold;
+      margin-bottom: 12px;
+      font-size: 1.6rem;
+    }
+    .debug-panel__summary[data-state="ok"] { color: #68d391; }
+    .debug-panel__summary[data-state="warning"] { color: #f6ad55; }
+    .debug-panel__grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 12px;
+    }
+    .debug-panel__card {
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 6px;
+      padding: 12px;
+      min-height: 180px;
+    }
+    .debug-panel__card h5 {
+      margin: 0 0 8px;
+      color: #f7fafc;
+      font-size: 1.5rem;
+    }
+    .debug-panel__card pre {
+      margin: 0;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-size: 1.2rem;
+      line-height: 1.4;
+      color: #d7e3f4;
+    }
+  </style>
+</head>
+<body>
+  <h1>Viewer Debug Output</h1>
+  <div class="debug-panel__summary" data-state="ok">Viewer and D2R state are in sync</div>
+  <div class="debug-panel__grid">
+    <div class="debug-panel__card">
+      <h5>Server state</h5>
+      <pre class="debug-panel__server">Waiting for data…</pre>
+    </div>
+    <div class="debug-panel__card">
+      <h5>Viewer state</h5>
+      <pre class="debug-panel__viewer">Waiting for data…</pre>
+    </div>
+    <div class="debug-panel__card">
+      <h5>Sync diagnostics</h5>
+      <pre class="debug-panel__sync">Waiting for data…</pre>
+    </div>
+    <div class="debug-panel__card">
+      <h5>Recent events</h5>
+      <pre class="debug-panel__events">Viewer initialized</pre>
+    </div>
+  </div>
+</body>
+</html>`;
+  }
+
+  formatDifficulty(difficulty?: number): string {
+    return difficulty == null || Difficulty[difficulty] == null ? `${difficulty ?? 'n/a'}` : Difficulty[difficulty];
+  }
+
+  formatAct(act?: number): string {
+    return act == null || Act[act] == null ? `${act ?? 'n/a'}` : Act[act];
+  }
+
+  formatTimestamp(value: number): string {
+    if (!value) return 'n/a';
+    return new Date(value).toLocaleTimeString();
+  }
+
+  formatAge(value: number): string {
+    if (!value) return 'n/a';
+    const diff = Math.max(0, Date.now() - value);
+    if (diff < 1000) return `${diff}ms ago`;
+    return `${(diff / 1000).toFixed(diff < 10000 ? 1 : 0)}s ago`;
+  }
+
+  formatLevelLabel(levelId?: number): string {
+    if (levelId == null || levelId <= 0) return '';
+    const act = ActUtil.fromLevel(levelId);
+    return act == null ? `(#${levelId})` : `(${Act[act]} #${levelId})`;
+  }
+
+  getWebSocketUrl(): string {
+    const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    return `${proto}//${window.location.host}/ws`;
   }
 }

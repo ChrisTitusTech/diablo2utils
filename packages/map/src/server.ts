@@ -74,6 +74,7 @@ class Diablo2MapServer {
       const seed = Number(body.seed);
       const difficulty = Number(body.difficulty);
       const act = Number(body.act);
+      const levelId = Number(body.levelId);
 
       if (isNaN(seed) || seed <= 0) {
         res.status(422).json({ message: 'Invalid seed' });
@@ -82,10 +83,13 @@ class Diablo2MapServer {
       currentGameState.seed = seed;
       currentGameState.difficulty = isNaN(difficulty) ? currentGameState.difficulty : difficulty;
       currentGameState.act = isNaN(act) ? currentGameState.act : act;
+      currentGameState.levelId = isNaN(levelId) ? currentGameState.levelId : levelId;
       currentGameState.updatedAt = Date.now();
 
       // Accept optional player position, units, items, kills from memory reader
-      if (body.player && typeof body.player === 'object') {
+      if (body.player === null) {
+        currentGameState.player = undefined;
+      } else if (body.player && typeof body.player === 'object') {
         currentGameState.player = body.player;
       }
       if (Array.isArray(body.units)) {
@@ -101,7 +105,7 @@ class Diablo2MapServer {
       // Broadcast to all connected WebSocket clients
       broadcastState(currentGameState);
 
-      Log.info({ seed, difficulty, act, hasPlayer: !!body.player }, 'State:Updated');
+      Log.info({ seed, difficulty, act, levelId, hasPlayer: currentGameState.player != null }, 'State:Updated');
       res.status(200).json(currentGameState);
     });
 

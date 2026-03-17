@@ -59,6 +59,7 @@ export interface Diablo2MapJson {
   id: number;
   act: Act;
   difficulty: Difficulty;
+  levelId?: number;
   isHardcore: boolean;
 }
 

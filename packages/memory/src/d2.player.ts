@@ -5,7 +5,7 @@ import { LogType } from './logger.js';
 import { ActS, D2rActStrut, D2rActMiscStrut } from './struts/d2r.act.js';
 import { D2rStatListStrut, D2rStatStrut } from './struts/d2r.js';
 import { D2rPathStrut, PathS } from './struts/d2r.path.js';
-import { RoomPointer, RoomS } from './struts/d2r.room.js';
+import { D2rLevelStrut, D2rRoomExStrut, RoomPointer, RoomS } from './struts/d2r.room.js';
 import { D2rUnitStrut, UnitAnyS } from './struts/d2r.unit.any.js';
 
 function isValidPointer(p: number): boolean {
@@ -81,6 +81,28 @@ export class Diablo2Player {
   getPath(player: UnitAnyS, logger: LogType): Promise<PathS> {
     if (!player.pPath.isValid) logger.error({ offset: toHex(player.pPath.offset) }, 'Player:OffsetInvalid:Path');
     return this.d2.readStrutAt(player.pPath.offset, D2rPathStrut);
+  }
+
+  async getLevelId(path: PathS, logger: LogType): Promise<number> {
+    if (!path.pRoom.isValid) {
+      logger.error({ offset: toHex(path.pRoom.offset) }, 'Player:OffsetInvalid:Room');
+      return 0;
+    }
+
+    const room = await path.pRoom.fetch(this.d2.process);
+    if (!room.pRoomExt.isValid) {
+      logger.error({ offset: toHex(room.pRoomExt.offset) }, 'Player:OffsetInvalid:RoomEx');
+      return 0;
+    }
+
+    const roomEx = await this.d2.readStrutAt(room.pRoomExt.offset, D2rRoomExStrut);
+    if (!roomEx.pLevel.isValid) {
+      logger.error({ offset: toHex(roomEx.pLevel.offset) }, 'Player:OffsetInvalid:Level');
+      return 0;
+    }
+
+    const level = await this.d2.readStrutAt(roomEx.pLevel.offset, D2rLevelStrut);
+    return level.levelId;
   }
 
   async getDifficulty(act: ActS, logger: LogType): Promise<Difficulty> {

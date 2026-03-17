@@ -13,7 +13,9 @@ function urlToParams(url: string): null | MapParams {
 
   const act = ActUtil.fromString(chunks[4]);
   if (act == null) return null;
-  return { seed, difficulty, act } as MapParams;
+
+  const levelId = Number(chunks[5]);
+  return { seed, difficulty, act, levelId: isNaN(levelId) ? undefined : levelId } as MapParams;
 }
 
 function urlToXyzParams(url: string): null | MapParams {
@@ -28,15 +30,23 @@ function urlToXyzParams(url: string): null | MapParams {
   const act = ActUtil.fromString(chunks[4]);
   if (act == null) return null;
 
-  const z = Number(chunks[5]);
-  const x = Number(chunks[6]);
-  const y = Number(chunks[7]);
+  let offset = 5;
+  let levelId: number | undefined;
+  const maybeLevel = Number(chunks[offset]);
+  if (!isNaN(maybeLevel)) {
+    levelId = maybeLevel;
+    offset++;
+  }
 
-  const rasterFillColor = chunks[8];
+  const z = Number(chunks[offset]);
+  const x = Number(chunks[offset + 1]);
+  const y = Number(chunks[offset + 2]);
+
+  const rasterFillColor = chunks[offset + 3];
 
   if (isNaN(x) || isNaN(y) || isNaN(z)) return null;
 
-  return { seed, difficulty, act, x, y, z, rasterFillColor };
+  return { seed, difficulty, act, levelId, x, y, z, rasterFillColor };
 }
 
 export type Cancel = { cancel: () => void };
@@ -48,8 +58,8 @@ export function registerMapProtocols(maplibregl: any): void {
     const data = urlToParams(params.url);
     if (data == null) return cb();
 
-    Diablo2MapTiles.get(data.difficulty, data.seed, data.act).then((c) => {
-      const vectorId = ['vector', toHex(data.difficulty, 8), Act[data.act], data.seed].join('__');
+    Diablo2MapTiles.get(data.difficulty, data.seed, data.act, data.levelId).then((c) => {
+      const vectorId = ['vector', toHex(data.difficulty, 8), Act[data.act], data.seed, data.levelId ?? 0].join('__');
       console.time(vectorId);
       const vector = toGeoJson(c, data.act);
 
