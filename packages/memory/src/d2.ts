@@ -5,7 +5,7 @@ import { Diablo2Player } from './d2.player.js';
 import { LogType } from './logger.js';
 import { Process } from './process.js';
 import { ScannerBuffer } from './scanner.js';
-import { D2rUnitDataPlayerStrut, D2rUnitStrut, UnitAnyS } from './struts/d2r.unit.any.js';
+import { D2rUnitDataItemStrut, D2rUnitDataPlayerStrut, D2rUnitStrut, UnitAnyS } from './struts/d2r.unit.any.js';
 import { Pointer } from './struts/pointer.js';
 import { dump } from './util/dump.js';
 
@@ -107,7 +107,32 @@ export class Diablo2Process {
           const unit = await this.readStrutAt(unitPtr, D2rUnitStrut);
           // Only include items (type 4); mode 3 = on ground, mode 5 = dropping
           if (unit.type === UnitType.Item && (unit.mode === 3 || unit.mode === 5)) {
-            items.set(unit.unitId, unit);
+            // Verify item is truly unowned (not in inventory/stash/cube/equipped).
+            // PrimeMH & d2r-mapview use dwOwnerId to distinguish ground items
+            // from items stored in a player's inventory.
+            let isGroundItem = true;
+            if (unit.pData.isValid) {
+              try {
+                const itemData = await this.readStrutAt(unit.pData.offset, D2rUnitDataItemStrut);
+                // dwOwnerId == 0 means unowned (ground item).
+                // dwOwnerId == 0xFFFFFFFF also means unowned in some versions.
+                // Any other value = owned by a player (inventory/stash/cube/belt/equipped).
+                if (itemData.dwOwnerId !== 0 && itemData.dwOwnerId !== 0xFFFFFFFF) {
+                  isGroundItem = false;
+                }
+                // Also exclude items that are stored in an inventory page
+                // invPage: 0=inventory, 1=stash, 2=cube. 0xFF=none (ground).
+                if (itemData.invPage <= 2) {
+                  isGroundItem = false;
+                }
+              } catch {
+                // Can't read ItemData — treat as suspect, skip
+                isGroundItem = false;
+              }
+            }
+            if (isGroundItem) {
+              items.set(unit.unitId, unit);
+            }
           }
           // Follow Unit.pNext (hash chain pointer at offset 0x150)
           unitPtr = unit.pNext;

@@ -6,6 +6,7 @@ import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
 import { ActMiscS, ActS, D2rActMiscStrut } from './struts/d2r.act.js';
+import { D2rLevelStrut, D2rRoomExStrut, D2rRoomStrut } from './struts/d2r.room.js';
 import { D2rUnitDataItemStrut, UnitAnyS } from './struts/d2r.unit.any.js';
 
 const sleep = (dur: number): Promise<void> => new Promise((r) => setTimeout(r, dur));
@@ -223,6 +224,10 @@ export class Diablo2GameSessionMemory {
     }
     if (mapState.levelId !== levelId) {
       mapState.levelId = levelId;
+      // Clear items when changing levels — the hash table contains ground items
+      // from ALL levels, and we only want to show items in the current area.
+      this.state.items.clear();
+      this.itemIgnore.clear();
       mapDirty = true;
     }
 
@@ -282,7 +287,48 @@ export class Diablo2GameSessionMemory {
       }
 
       const loc = await unit.pPath.fetch(this.d2.process);
+
+      // Filter by current level: the hash table contains ground items from ALL
+      // areas (e.g. a Key left in the Tower, Grand Charms in another area).
+      // Resolve item.pPath → pRoom → pRoomExt → pLevel → levelId and skip
+      // any item that is not in the player's current level.
+      if (loc.pRoom.isValid && levelId > 0) {
+        try {
+          const room = await this.d2.readStrutAt(loc.pRoom.offset, D2rRoomStrut);
+          if (room.pRoomExt.isValid) {
+            const roomEx = await this.d2.readStrutAt(room.pRoomExt.offset, D2rRoomExStrut);
+            if (roomEx.pLevel.isValid) {
+              const itemLevel = await this.d2.readStrutAt(roomEx.pLevel.offset, D2rLevelStrut);
+              if (itemLevel.levelId !== levelId) {
+                this.itemIgnore.add(itemKey);
+                continue;
+              }
+            }
+          }
+        } catch {
+          // Can't resolve item level — skip to be safe
+          this.itemIgnore.add(itemKey);
+          continue;
+        }
+      }
+
       const itemUnitData = unit.pData.isValid ? await this.d2.readStrutAt(unit.pData.offset, D2rUnitDataItemStrut) : null;
+
+      // Double-check ownership: skip items in player inventory/stash/cube/belt.
+      // dwOwnerId != 0 and != 0xFFFFFFFF means the item belongs to a player.
+      if (itemUnitData != null) {
+        const ownerId = itemUnitData.dwOwnerId;
+        if (ownerId !== 0 && ownerId !== 0xFFFFFFFF) {
+          this.itemIgnore.add(itemKey);
+          continue;
+        }
+        // invPage 0=inventory, 1=stash, 2=cube — those are not ground drops
+        if (itemUnitData.invPage <= 2) {
+          this.itemIgnore.add(itemKey);
+          continue;
+        }
+      }
+
       const qualityId = itemUnitData?.quality ?? ItemQuality.NotApplicable;
       const itemJson: Diablo2ItemJson = {
         type: 'item',
@@ -300,6 +346,17 @@ export class Diablo2GameSessionMemory {
       };
 
       this.state.trackItem(itemJson);
+    }
+
+    // Reconcile state: remove tracked items that are no longer on the ground.
+    // Without this, picked-up / despawned items persist in the drops display
+    // until the distance/time filter in filterOld() eventually cleans them.
+    const groundIds = new Set(units.keys());
+    for (const trackedId of this.state.items.keys()) {
+      if (!groundIds.has(trackedId)) {
+        this.state.items.delete(trackedId);
+        this.state.dirty();
+      }
     }
 
     const duration = Number(process.hrtime.bigint() - startTime) / 1_000_000;
