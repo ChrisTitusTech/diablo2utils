@@ -40,6 +40,12 @@ export class Diablo2MapTiles {
   static tiles = new LruCache<Promise<unknown>>(1024);
   static maps = new LruCache<Promise<LevelData>>(32);
 
+  /** Flush all cached map and tile data so subsequent fetches hit the server */
+  static clearCache(): void {
+    this.maps.clear();
+    this.tiles.clear();
+  }
+
   static url(difficulty: Difficulty, seed: number, act: number, levelId?: number): string {
     const base = `v1/map/${toHex(seed, 8)}/${Difficulty[difficulty]}/${Act[act]}`;
     return levelId != null && levelId > 0 ? `${base}/${levelId}.json` : `${base}.json`;

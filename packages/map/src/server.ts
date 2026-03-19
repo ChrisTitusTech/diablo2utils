@@ -52,6 +52,8 @@ async function reconcileLevel(): Promise<void> {
       );
       currentGameState.levelId = resolved.id;
       currentGameState.act = ActUtil.fromLevel(resolved.id) ?? act;
+      currentGameState.updatedAt = Date.now();
+      broadcastState(currentGameState);
     }
   } catch (err) {
     Log.warn({ err, seed, act, levelId }, 'State:LevelReconcileFailed');

@@ -27,4 +27,9 @@ export class LruCache<T> {
 
     this.values.set(key, value);
   }
+
+  public clear(): void {
+    this.values = new Map();
+    this.valuesOld = new Map();
+  }
 }

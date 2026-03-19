@@ -310,6 +310,12 @@ export class Diablo2MapViewer {
       (map.levelId ?? 0) !== nextLevelId;
 
     if (changed) {
+      // When the seed or difficulty changes, flush cached map/tile data so the
+      // viewer doesn't render stale maps from a previous game session.
+      if (map.id !== state.seed || map.difficulty !== state.difficulty) {
+        Diablo2MapTiles.clearCache();
+        this.lastUrl = '';
+      }
       map.id = state.seed;
       map.act = nextAct ?? map.act;
       map.difficulty = state.difficulty ?? map.difficulty;

@@ -906,7 +906,7 @@ int get_act(int levelCode) {
     return -1;
 }
 
-int d2_dump_map(int seed, int difficulty, int levelCode) {
+int d2_dump_map(unsigned int seed, int difficulty, int levelCode) {
     log_trace("Map:DumpStart", lk_i("levelCode", levelCode));
     LevelTxt *levelData = d2common_get_level_text(levelCode);
     if (!levelData) {

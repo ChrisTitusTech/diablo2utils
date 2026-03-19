@@ -9,13 +9,13 @@
 
 /* Cache the recently generated acts; unload on seed/difficulty change */
 static Act *acts[5] = {NULL, NULL, NULL, NULL, NULL};
-static int act_seeds[5] = {0, 0, 0, 0, 0};
+static unsigned int act_seeds[5] = {0, 0, 0, 0, 0};
 static int act_diff[5] = {-1, -1, -1, -1, -1};
 
 /* Town level IDs per act (D2Common_LoadAct requires the correct town level) */
 static const DWORD townLevelIds[5] = {1, 40, 75, 103, 109};
 
-static Act *d2common_load_act_run(int actId, int seed, int difficulty) {
+static Act *d2common_load_act_run(int actId, unsigned int seed, int difficulty) {
     DWORD townLevelId = (actId >= 0 && actId < 5) ? townLevelIds[actId] : 1;
     return D2COMMON_LoadAct(actId, seed, TRUE, FALSE, difficulty, (DWORD)NULL,
                             townLevelId, D2CLIENT_LoadAct_1, D2CLIENT_LoadAct_2);
@@ -25,7 +25,7 @@ static void d2common_unload_act(Act *pAct) {
     D2COMMON_UnloadAct(pAct);
 }
 
-static Act *d2common_load_act(int actId, int seed, int difficulty) {
+static Act *d2common_load_act(int actId, unsigned int seed, int difficulty) {
     if (act_seeds[actId] == seed && act_diff[actId] == difficulty) return acts[actId];
     if (acts[actId] != NULL) d2common_unload_act(acts[actId]);
 

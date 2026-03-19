@@ -5,6 +5,6 @@
 
 int get_act(int act);
 void d2_game_init(char *folderName);
-int d2_dump_map(int seed, int difficulty, int levelCode);
+int d2_dump_map(unsigned int seed, int difficulty, int levelCode);
 
 #endif
