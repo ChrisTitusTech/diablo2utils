@@ -27,8 +27,10 @@ export interface GameStateItem {
   name?: string;
   code?: string;
   quality?: { id: number; name: string };
+  seenAt?: number;
   sockets?: number;
   isEthereal?: boolean;
+  isIdentified?: boolean;
   isRuneWord?: boolean;
 }
 

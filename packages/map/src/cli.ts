@@ -1,25 +1,20 @@
 import express from 'express';
+import * as fs from 'fs';
+import * as path from 'path';
 import { Log } from './logger.js';
 import { Diablo2Path, MapCluster } from './map/map.process.js';
 import { MapServer } from './server.js';
-import * as fs from 'fs';
 
-if (!fs.existsSync(Diablo2Path)) Log.warn({ path: Diablo2Path }, `Diablo2Path:Missing`);
+if (!fs.existsSync(Diablo2Path)) Log.warn({ path: Diablo2Path }, 'Diablo2Path:Missing');
 
-MapServer.server.get('/', (ex: express.Request, res: express.Response) => {
-  const html = fs.readFileSync('./www/index.html');
+const wwwDir = path.join(__dirname, 'www');
 
-  res.status(200);
-  res.header('text/html');
-  res.end(html);
+// Serve index.js with env replacement; everything else as plain static files
+MapServer.server.get('/index.js', (_req: express.Request, res: express.Response) => {
+  const js = fs.readFileSync(path.join(wwwDir, 'index.js'), 'utf-8').replace('process.env.MAP_HOST', "''");
+  res.type('text/javascript').send(js);
 });
-MapServer.server.get('/index.js', (ex: express.Request, res: express.Response) => {
-  const js = fs.readFileSync('./www/index.js').toString().replace('process.env.MAP_HOST', "''");
-
-  res.status(200);
-  res.header('text/javascript');
-  res.end(js);
-});
+MapServer.server.use(express.static(wwwDir));
 
 if (process.env['DIABLO2_CLUSTER_SIZE']) {
   const clusterSize = Number(process.env['DIABLO2_CLUSTER_SIZE']);
@@ -27,6 +22,5 @@ if (process.env['DIABLO2_CLUSTER_SIZE']) {
 }
 
 MapServer.init().catch((e) => {
-  console.log(e);
   Log.fatal({ error: e }, 'Uncaught Exception');
 });

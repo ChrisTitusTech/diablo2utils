@@ -3,7 +3,7 @@ import { toHex } from 'binparse/build/src/hex.js';
 import { LevelBounds } from './bounds.js';
 import { MapLayers } from './map.objects.js';
 import { registerMapProtocols } from './map.protocol.js';
-import { Diablo2GameState } from '@diablo2/state';
+import { Diablo2GameState, Diablo2ItemJson } from '@diablo2/state';
 import { toFeatureCollection } from '@linzjs/geojson';
 import { Diablo2MapTiles } from './tile.js';
 import { GameStateWsClient } from './ws.client.js';
@@ -38,6 +38,7 @@ interface MapFetchDebugDetail {
 export class Diablo2MapViewer {
   map: any;
   debugWindow: Window | null = null;
+  dropsWindow: Window | null = null;
 
   color = 'white';
   ctx: Diablo2GameState;
@@ -227,6 +228,7 @@ export class Diablo2MapViewer {
 
   handleStateUpdate(state: any, source: ViewerStateSource = 'ws'): void {
     if (!state) return;
+
     if (state.seed <= 0) {
       const invalidHasPlayer = !!state.player && state.player.x > 0 && state.player.y > 0;
       const hasValidServerState = this.debugState.server.seed > 0 && this.debugState.server.updatedAt > 0;
@@ -275,7 +277,9 @@ export class Diablo2MapViewer {
       this.updateDebugDom();
       return;
     }
-    if (state.updatedAt <= this.lastStateUpdatedAt) return;
+    if (state.updatedAt <= this.lastStateUpdatedAt) {
+      return;
+    }
 
     this.lastStateUpdatedAt = state.updatedAt;
     const map = this.ctx.state.map;
@@ -575,6 +579,14 @@ export class Diablo2MapViewer {
           this.openDebugWindow();
         }),
       );
+
+    document
+      .querySelectorAll<HTMLButtonElement>('button.options__drops-toggle')
+      .forEach((f) =>
+        f.addEventListener('click', (): void => {
+          this.toggleDropsWindow();
+        }),
+      );
   }
 
   updateDom(): void {
@@ -610,7 +622,79 @@ export class Diablo2MapViewer {
       }
     });
 
+    const dropsToggle = document.querySelector('.options__drops-toggle') as HTMLButtonElement | null;
+    if (dropsToggle) {
+      const dropsWindowOpen = this.isDropsWindowOpen();
+      dropsToggle.innerText = dropsWindowOpen ? 'Close Drops' : 'Open Drops';
+      dropsToggle.classList.toggle('button-outline', dropsWindowOpen);
+      dropsToggle.classList.toggle('button-clear', !dropsWindowOpen);
+    }
+
     this.updateDebugDom();
+  }
+
+  isDropsWindowOpen(): boolean {
+    return this.dropsWindow != null && !this.dropsWindow.closed;
+  }
+
+  toggleDropsWindow(): void {
+    if (this.isDropsWindowOpen()) {
+      this.closeDropsWindow();
+      return;
+    }
+    this.openDropsWindow();
+  }
+
+  openDropsWindow(): void {
+    if (this.isDropsWindowOpen()) {
+      this.dropsWindow?.focus();
+      return;
+    }
+
+    const popup = window.open('/drops.html', 'diablo2-drops', 'popup=yes,width=520,height=760,resizable=yes,scrollbars=yes');
+    if (popup == null) {
+      this.recordDebugEvent('drops:window-blocked', 'Drops window was blocked by the browser, falling back to the drops page', undefined, 'warn');
+      window.location.assign('/drops.html');
+      return;
+    }
+
+    this.dropsWindow = popup;
+    popup.addEventListener('beforeunload', () => this.handleDropsWindowClosed(), { once: true });
+    popup.focus();
+    this.update();
+  }
+
+  closeDropsWindow(): void {
+    const popup = this.dropsWindow;
+    if (popup != null && !popup.closed) popup.close();
+    this.handleDropsWindowClosed();
+  }
+
+  handleDropsWindowClosed(): void {
+    if (this.dropsWindow == null) return;
+    this.dropsWindow = null;
+    this.update();
+  }
+
+  describeDropItem(item: Diablo2ItemJson): string {
+    const details: string[] = [];
+    if (item.code) details.push(`code=${item.code}`);
+    if (item.quality?.name) details.push(`quality=${item.quality.name}`);
+    if (item.x != null && item.y != null) details.push(`pos=${item.x},${item.y}`);
+    if (item.sockets != null) details.push(`sockets=${item.sockets}`);
+    if (item.isEthereal) details.push('ethereal');
+    if (item.isIdentified) details.push('identified');
+    if (item.isRuneWord) details.push('runeword');
+    return `${item.name}${details.length > 0 ? ` — ${details.join(', ')}` : ''}`;
+  }
+
+  escapeHtml(value: string): string {
+    return value
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
   }
 
   installDebugHooks(): void {

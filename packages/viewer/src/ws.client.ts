@@ -106,4 +106,10 @@ export class GameStateWsClient {
     this.ws?.close();
     this.ws = null;
   }
+
+  send(message: unknown): boolean {
+    if (this.ws == null || this.ws.readyState !== WebSocket.OPEN) return false;
+    this.ws.send(JSON.stringify(message));
+    return true;
+  }
 }

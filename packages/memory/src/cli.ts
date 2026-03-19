@@ -1,8 +1,11 @@
 import { Diablo2MpqLoader } from '@diablo2/bintools';
 import { Act, Difficulty } from '@diablo2/data';
 import de from 'dotenv';
+import fs from 'fs';
 import http from 'http';
+import path from 'path';
 import 'source-map-support/register.js';
+import { fileURLToPath } from 'url';
 import { Diablo2Process } from './d2.js';
 import { Log } from './logger.js';
 import { Diablo2GameSessionMemory } from './session.js';
@@ -23,8 +26,25 @@ function getPlayerName(): string | null {
   return null;
 }
 
+function resolveDiablo2Path(): string | null {
+  const currentFilePath = fileURLToPath(import.meta.url);
+  const candidates = [
+    process.env['DIABLO2_PATH'],
+    path.resolve(process.cwd(), 'assets/d2'),
+    path.resolve(process.cwd(), '../assets/d2'),
+    path.resolve(process.cwd(), '../../assets/d2'),
+    path.resolve(path.dirname(currentFilePath), '../../../assets/d2'),
+  ].filter((candidate): candidate is string => Boolean(candidate));
+
+  for (const candidate of candidates) {
+    if (fs.existsSync(path.join(candidate, 'd2data.mpq'))) return candidate;
+  }
+
+  return null;
+}
+
 /** Simple HTTP GET that returns the parsed JSON body. */
-function httpGetJson(url: string): Promise<{ levels?: unknown[] }> {
+function httpGetJson<T = { levels?: unknown[] }>(url: string): Promise<T> {
   return new Promise((resolve, reject) => {
     const req = http.get(url, (res) => {
       let data = '';
@@ -35,7 +55,7 @@ function httpGetJson(url: string): Promise<{ levels?: unknown[] }> {
           return;
         }
         try {
-          resolve(JSON.parse(data));
+          resolve(JSON.parse(data) as T);
         } catch {
           reject(new Error(`Invalid JSON from ${url}`));
         }
@@ -109,9 +129,11 @@ function buildStatePayload(session: Diablo2GameSessionMemory): Record<string, un
       code: item.code,
       x: item.x,
       y: item.y,
+      seenAt: item.seenAt,
       quality: item.quality,
       sockets: item.sockets,
       isEthereal: item.isEthereal,
+      isIdentified: item.isIdentified,
       isRuneWord: item.isRuneWord,
     })),
     kills: json.kills,
@@ -168,7 +190,12 @@ async function main(): Promise<void> {
   const playerName = getPlayerName();
   if (playerName == null) return usage('Missing player name');
 
-  if (process.env['DIABLO2_PATH']) await Diablo2MpqLoader.load(process.env['DIABLO2_PATH'], Log);
+  const diablo2Path = resolveDiablo2Path();
+  if (diablo2Path) {
+    await Diablo2MpqLoader.load(diablo2Path, Log);
+  } else {
+    Log.warn({ cwd: process.cwd() }, 'Process:MpqPathNotFound');
+  }
 
   const proc = await Diablo2Process.find();
 

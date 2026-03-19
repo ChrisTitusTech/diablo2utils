@@ -14,24 +14,86 @@ import { StateGetRoute, currentGameState } from './routes/state.js';
 import { setupWebSocket, broadcastState } from './ws.js';
 
 function isPointInLevel(level: Diablo2Level, x: number, y: number): boolean {
-  if (x < level.offset.x) return false;
-  if (y < level.offset.y) return false;
-  if (x >= level.offset.x + level.size.width) return false;
-  if (y >= level.offset.y + level.size.height) return false;
-  return true;
+  return (
+    x >= level.offset.x &&
+    y >= level.offset.y &&
+    x < level.offset.x + level.size.width &&
+    y < level.offset.y + level.size.height
+  );
 }
 
 function resolveLevelFromPoint(levels: Diablo2Level[], x: number, y: number, preferredLevelId?: number): Diablo2Level | null {
-  const matches = levels.filter((level) => isPointInLevel(level, x, y));
+  const matches = levels.filter((l) => isPointInLevel(l, x, y));
   if (matches.length === 0) return null;
-
   if (preferredLevelId != null && preferredLevelId > 0) {
-    const preferred = matches.find((level) => level.id === preferredLevelId);
+    const preferred = matches.find((l) => l.id === preferredLevelId);
     if (preferred) return preferred;
   }
-
+  // Prefer smallest area (most specific)
   matches.sort((a, b) => a.size.width * a.size.height - b.size.width * b.size.height);
   return matches[0] ?? null;
+}
+
+/** Reconcile the player's position against the loaded map levels */
+async function reconcileLevel(): Promise<void> {
+  const { player, seed, act, levelId = 0, difficulty } = currentGameState;
+  if (player == null || typeof player.x !== 'number' || typeof player.y !== 'number') return;
+  if (player.x <= 0 || player.y <= 0 || seed <= 0) return;
+
+  try {
+    const resolvedAct = levelId > 0 ? (ActUtil.fromLevel(levelId) ?? act) : act;
+    const levels = await MapCluster.map(seed, difficulty, resolvedAct, Log);
+    const resolved = resolveLevelFromPoint(levels, player.x, player.y, levelId);
+
+    if (resolved != null && resolved.id !== levelId) {
+      Log.info(
+        { seed, act: resolvedAct, reportedLevelId: levelId, resolvedLevelId: resolved.id, resolvedLevelName: resolved.name, player: { x: player.x, y: player.y } },
+        'State:LevelReconciled',
+      );
+      currentGameState.levelId = resolved.id;
+      currentGameState.act = ActUtil.fromLevel(resolved.id) ?? act;
+    }
+  } catch (err) {
+    Log.warn({ err, seed, act, levelId }, 'State:LevelReconcileFailed');
+  }
+}
+
+/** Handle POST /v1/state from the memory reader */
+async function handleStatePost(req: express.Request, res: express.Response): Promise<void> {
+  const body = req.body;
+  if (body == null || typeof body !== 'object') {
+    res.status(400).json({ message: 'Invalid body' });
+    return;
+  }
+
+  const seed = Number(body.seed);
+  if (isNaN(seed) || seed <= 0) {
+    res.status(422).json({ message: 'Invalid seed' });
+    return;
+  }
+
+  currentGameState.seed = seed;
+
+  const difficulty = Number(body.difficulty);
+  const act = Number(body.act);
+  const levelId = Number(body.levelId);
+  if (!isNaN(difficulty)) currentGameState.difficulty = difficulty;
+  if (!isNaN(act)) currentGameState.act = act;
+  if (!isNaN(levelId)) currentGameState.levelId = levelId;
+
+  if (body.player === null) currentGameState.player = undefined;
+  else if (body.player && typeof body.player === 'object') currentGameState.player = body.player;
+  if (Array.isArray(body.units)) currentGameState.units = body.units;
+  if (Array.isArray(body.items)) currentGameState.items = body.items;
+  if (Array.isArray(body.kills)) currentGameState.kills = body.kills;
+
+  await reconcileLevel();
+
+  currentGameState.updatedAt = Date.now();
+  broadcastState(currentGameState);
+
+  Log.info({ seed, difficulty, act, levelId, hasPlayer: currentGameState.player != null }, 'State:Updated');
+  res.status(200).json(currentGameState);
 }
 
 class Diablo2MapServer {
@@ -53,27 +115,22 @@ class Diablo2MapServer {
       try {
         const output = await route.process(req, res);
         if (output != null) {
-          res.status(200);
           if (Buffer.isBuffer(output)) {
-            res.header('content-type', 'image/png');
-            res.end(output);
+            res.status(200).header('content-type', 'image/png').end(output);
           } else {
-            res.json(output);
+            res.status(200).json(output);
           }
         }
       } catch (e) {
         if (e instanceof HttpError) {
           req.log.warn(e.message);
-          res.status(e.status ?? 500);
-          res.json({ id: req.id, message: e.message });
+          res.status(e.status ?? 500).json({ id: req.id, message: e.message });
         } else {
           req.log.error({ err: e }, 'Failed to run');
-          res.status(500);
-          res.json({ id: req.id, message: `Internal server error` });
+          res.status(500).json({ id: req.id, message: 'Internal server error' });
         }
       }
-      const duration = Date.now() - startTime;
-      req.log.info({ duration, status: res.statusCode }, req.url);
+      req.log.info({ duration: Date.now() - startTime, status: res.statusCode }, req.url);
       next();
     });
   }
@@ -86,86 +143,7 @@ class Diablo2MapServer {
     this.bind(new MapActLevelRoute());
     this.bind(new MapImageRoute());
 
-    // POST /v1/state — memory reader pushes game state updates
-    this.server.post('/v1/state', async (req: express.Request, res: express.Response) => {
-      const body = req.body;
-      if (body == null || typeof body !== 'object') {
-        res.status(400).json({ message: 'Invalid body' });
-        return;
-      }
-      const seed = Number(body.seed);
-      const difficulty = Number(body.difficulty);
-      const act = Number(body.act);
-      const levelId = Number(body.levelId);
-
-      if (isNaN(seed) || seed <= 0) {
-        res.status(422).json({ message: 'Invalid seed' });
-        return;
-      }
-      currentGameState.seed = seed;
-      currentGameState.difficulty = isNaN(difficulty) ? currentGameState.difficulty : difficulty;
-      currentGameState.act = isNaN(act) ? currentGameState.act : act;
-      currentGameState.levelId = isNaN(levelId) ? currentGameState.levelId : levelId;
-
-      // Accept optional player position, units, items, kills from memory reader
-      if (body.player === null) {
-        currentGameState.player = undefined;
-      } else if (body.player && typeof body.player === 'object') {
-        currentGameState.player = body.player;
-      }
-      if (Array.isArray(body.units)) {
-        currentGameState.units = body.units;
-      }
-      if (Array.isArray(body.items)) {
-        currentGameState.items = body.items;
-      }
-      if (Array.isArray(body.kills)) {
-        currentGameState.kills = body.kills;
-      }
-
-      const player = currentGameState.player;
-      if (
-        player != null &&
-        typeof player.x === 'number' &&
-        typeof player.y === 'number' &&
-        player.x > 0 &&
-        player.y > 0 &&
-        currentGameState.seed > 0
-      ) {
-        try {
-          const currentLevelId = currentGameState.levelId ?? 0;
-          const resolvedAct = currentLevelId > 0 ? (ActUtil.fromLevel(currentLevelId) ?? currentGameState.act) : currentGameState.act;
-          const levels = await MapCluster.map(currentGameState.seed, currentGameState.difficulty, resolvedAct, Log);
-          const resolvedLevel = resolveLevelFromPoint(levels, player.x, player.y, currentLevelId);
-
-          if (resolvedLevel != null && resolvedLevel.id !== currentLevelId) {
-            Log.info(
-              {
-                seed: currentGameState.seed,
-                act: resolvedAct,
-                reportedLevelId: currentLevelId,
-                resolvedLevelId: resolvedLevel.id,
-                resolvedLevelName: resolvedLevel.name,
-                player: { x: player.x, y: player.y },
-              },
-              'State:LevelReconciled',
-            );
-            currentGameState.levelId = resolvedLevel.id;
-            currentGameState.act = ActUtil.fromLevel(resolvedLevel.id) ?? currentGameState.act;
-          }
-        } catch (err) {
-          Log.warn({ err, seed: currentGameState.seed, act: currentGameState.act, levelId: currentGameState.levelId }, 'State:LevelReconcileFailed');
-        }
-      }
-
-      currentGameState.updatedAt = Date.now();
-
-      // Broadcast to all connected WebSocket clients
-      broadcastState(currentGameState);
-
-      Log.info({ seed, difficulty, act, levelId, hasPlayer: currentGameState.player != null }, 'State:Updated');
-      res.status(200).json(currentGameState);
-    });
+    this.server.post('/v1/state', handleStatePost);
 
     const httpServer = http.createServer(this.server);
     setupWebSocket(httpServer);

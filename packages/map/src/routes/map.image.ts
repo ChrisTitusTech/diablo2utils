@@ -1,23 +1,24 @@
 import * as NodeCanvas from 'canvas';
+import { ActUtil } from '@diablo2/data';
+import { LevelRender } from '@diablo2/viewer';
 import { MapCluster } from '../map/map.process.js';
 import { HttpError, Request, Route } from '../route.js';
-import { LevelRender } from '@diablo2/viewer';
-import { isInSeedRange } from './map.js';
-import { ActUtil, DifficultyUtil } from '@diablo2/data';
+import { validateSeedDifficulty } from './map.js';
 
 export class MapImageRoute implements Route {
   url = '/v1/map/:seed/:difficulty/:level.png';
 
   async process(req: Request): Promise<Buffer> {
-    const { seed, difficulty, level } = await MapImageRoute.validateParams(req);
-    const act = ActUtil.fromLevel(level);
+    const { seed, difficulty } = validateSeedDifficulty(req);
+    const level = Number(req.params.level);
+    if (isNaN(level)) throw new HttpError(422, 'Invalid level');
 
+    const act = ActUtil.fromLevel(level);
     const maps = await MapCluster.map(seed, difficulty, act, req.log);
     const zone = maps.find((f) => f.id === level);
     if (zone == null) throw new HttpError(422, 'Invalid level');
 
     const canvas = NodeCanvas.createCanvas(zone.size.width, zone.size.height + 32);
-
     const ctx = canvas.getContext('2d') as unknown as CanvasRenderingContext2D;
 
     ctx.fillStyle = 'black';
@@ -40,18 +41,5 @@ export class MapImageRoute implements Route {
     );
 
     return canvas.toBuffer('image/png');
-  }
-
-  static async validateParams(req: Request): Promise<{ seed: number; difficulty: number; level: number }> {
-    const seed = Number(req.params.seed);
-    if (isNaN(seed) || !isInSeedRange(seed)) throw new HttpError(422, 'Invalid seed');
-
-    const difficulty = DifficultyUtil.fromString(req.params.difficulty);
-    if (difficulty == null) throw new HttpError(422, 'Invalid difficulty');
-
-    const level = Number(req.params.level);
-    if (isNaN(level)) throw new HttpError(422, 'Invalid level');
-
-    return { seed, difficulty, level };
   }
 }

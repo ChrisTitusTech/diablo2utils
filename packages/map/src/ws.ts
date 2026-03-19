@@ -7,6 +7,10 @@ import { currentGameState } from './routes/state.js';
 let wss: WebSocketServer | null = null;
 const clients = new Set<WebSocket>();
 
+function removeClient(ws: WebSocket): void {
+  clients.delete(ws);
+}
+
 /**
  * Attach a WebSocket server to the existing HTTP server at path `/ws`.
  * Connected browsers receive JSON game-state broadcasts in real time.
@@ -25,13 +29,13 @@ export function setupWebSocket(server: http.Server): void {
     }
 
     ws.on('close', () => {
-      clients.delete(ws);
+      removeClient(ws);
       Log.info({ clients: clients.size }, 'WS:Disconnected');
     });
 
     ws.on('error', (err) => {
       Log.warn({ err: String(err) }, 'WS:Error');
-      clients.delete(ws);
+      removeClient(ws);
     });
   });
 

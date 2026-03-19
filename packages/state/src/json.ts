@@ -46,6 +46,7 @@ export interface Diablo2ItemJson extends Diablo2BaseGameJson {
   type: 'item';
   code: string;
   quality: { id: ItemQuality; name: string };
+  seenAt?: number;
   sockets?: number;
   isEthereal?: boolean;
   isIdentified?: boolean;

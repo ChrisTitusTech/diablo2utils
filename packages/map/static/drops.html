@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Diablo II Drops</title>
+  <style>
+    :root {
+      color-scheme: dark;
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Roboto Condensed', sans-serif;
+      background: #111827;
+      color: #f7fafc;
+    }
+
+    .drops-panel {
+      min-height: 100vh;
+      background: rgba(17, 24, 39, 0.98);
+      color: #f7fafc;
+    }
+
+    .drops-panel__toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 14px 10px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      position: sticky;
+      top: 0;
+      background: rgba(17, 24, 39, 0.98);
+    }
+
+    .drops-panel__title-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .drops-panel__title {
+      margin: 0;
+      font-size: 2rem;
+      line-height: 1;
+    }
+
+    .drops-panel__subtitle {
+      font-size: 1.2rem;
+      color: #94a3b8;
+    }
+
+    .drops-panel__actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+    .drops-panel__button,
+    .drops-panel__link {
+      margin: 0;
+      padding: 8px 12px;
+      border: 1px solid rgba(255, 255, 255, 0.35);
+      border-radius: 6px;
+      background: transparent;
+      color: #f7fafc;
+      cursor: pointer;
+      text-decoration: none;
+      font: inherit;
+    }
+
+    .drops-panel__button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .drops-panel__export-status {
+      min-width: 92px;
+      text-align: right;
+      font-size: 1.2rem;
+      color: #cbd5e1;
+    }
+
+    .drops-panel__export-status[data-state="ok"] {
+      color: #68d391;
+    }
+
+    .drops-panel__export-status[data-state="error"] {
+      color: #f6ad55;
+    }
+
+    .drops-panel__summary {
+      padding: 10px 14px;
+      font-weight: bold;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+      color: #90cdf4;
+    }
+
+    .drops-panel__content {
+      padding: 14px;
+    }
+
+    .drops-panel__list {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .drops-panel__item,
+    .drops-panel__empty {
+      font-size: 1.3rem;
+      line-height: 1.35;
+      padding: 8px 10px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .drops-panel__meta {
+      display: block;
+      margin-top: 4px;
+      font-size: 1.1rem;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <aside class="drops-panel">
+    <div class="drops-panel__toolbar">
+      <div class="drops-panel__title-wrap">
+        <h2 class="drops-panel__title">Drops</h2>
+        <span class="drops-panel__subtitle">Nearby ground items, newest first</span>
+      </div>
+      <div class="drops-panel__actions">
+        <a class="drops-panel__link" href="/">Back to Map</a>
+        <button class="drops-panel__button drops-panel__export" type="button" disabled>Export TXT</button>
+        <span class="drops-panel__export-status" data-state="ok"></span>
+      </div>
+    </div>
+    <div class="drops-panel__summary">Waiting for drop data…</div>
+    <div class="drops-panel__content"></div>
+  </aside>
+  <script src="/drops.js"></script>
+</body>
+</html>

@@ -122,9 +122,22 @@ export class Diablo2State {
   trackItem(itm: GameJson.Diablo2ItemJson): void {
     let existing = this.items.get(itm.id);
     if (existing == null) {
-      existing = itm;
-      this.items.set(itm.id, itm);
+      existing = { ...itm, seenAt: itm.seenAt ?? itm.updatedAt };
+      this.items.set(itm.id, existing);
+      this.dirty();
+      return;
     }
+
+    existing.name = itm.name;
+    existing.code = itm.code;
+    existing.x = itm.x;
+    existing.y = itm.y;
+    existing.quality = itm.quality;
+    existing.sockets = itm.sockets;
+    existing.isEthereal = itm.isEthereal;
+    existing.isIdentified = itm.isIdentified;
+    existing.isRuneWord = itm.isRuneWord;
+    existing.seenAt ??= itm.seenAt ?? existing.updatedAt;
     existing.updatedAt = Date.now();
     this.dirty();
   }
@@ -260,7 +273,7 @@ export class Diablo2State {
       map: this.map,
       objects: [...this.objects.values()],
       units: [...this.units.values()].sort((a, b) => a.id - b.id),
-      items: [...this.items.values()].sort(latestUpdated).slice(0, 25),
+      items: [...this.items.values()].sort(latestSeen),
       kills: [...this.kills.values()],
     };
   }
@@ -281,6 +294,6 @@ export class Diablo2State {
   }
 }
 
-function latestUpdated(a: GameJson.Diablo2BaseGameJson, b: GameJson.Diablo2BaseGameJson): number {
-  return b.updatedAt - a.updatedAt;
+function latestSeen(a: GameJson.Diablo2ItemJson, b: GameJson.Diablo2ItemJson): number {
+  return (b.seenAt ?? b.updatedAt) - (a.seenAt ?? a.updatedAt);
 }

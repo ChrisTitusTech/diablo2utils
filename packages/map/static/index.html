@@ -116,6 +116,17 @@
         .options__debug {
             margin: 0;
         }
+
+        .options__drops-toggle {
+            margin: 0;
+        }
+
+        .header__actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
     </style>
 
 
@@ -125,7 +136,10 @@
     <div id="content">
         <header>
             <div class="header__left">
-                <button class="options__debug button button-clear" type="button">Debug Output</button>
+                <div class="header__actions">
+                    <button class="options__drops-toggle button button-clear" type="button">Open Drops</button>
+                    <button class="options__debug button button-clear" type="button">Debug Output</button>
+                </div>
             </div>
             <div class="options">
                 <span class="options__difficulty-label options__label">Difficulty: </span>

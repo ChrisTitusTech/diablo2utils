@@ -1,11 +1,12 @@
 import { Diablo2State } from '@diablo2/core';
-import { ActUtil, Attribute, Difficulty, Diablo2Mpq, UnitType } from '@diablo2/data';
+import { ActUtil, Attribute, Difficulty, Diablo2Mpq, ItemQuality, UnitType } from '@diablo2/data';
 import { toHex } from 'binparse';
 import { Diablo2ItemJson } from 'packages/state/build/json.js';
 import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
 import { ActMiscS, ActS, D2rActMiscStrut } from './struts/d2r.act.js';
+import { D2rUnitDataItemStrut, UnitAnyS } from './struts/d2r.unit.any.js';
 
 const sleep = (dur: number): Promise<void> => new Promise((r) => setTimeout(r, dur));
 const UINT32_MOD = 0x1_0000_0000n;
@@ -13,6 +14,9 @@ const UINT32_MASK = 0xffff_ffffn;
 const SEED_MAGIC = 0x6ac6_90c5n;
 const SEED_MAGIC_INVERSE = 0x8a3e_6e0dn;
 const SEED_OFFSET = 666n;
+const ITEM_FLAG_IDENTIFIED = 0x0000_0010;
+const ITEM_FLAG_ETHEREAL = 0x0400_0000;
+const ITEM_FLAG_RUNEWORD = 0x4000_0000;
 
 export class Diablo2GameSessionMemory {
   state: Diablo2State;
@@ -194,21 +198,27 @@ export class Diablo2GameSessionMemory {
       if (this.itemIgnore.has(itemKey)) continue;
       if (this.state.items.has(unit.unitId)) continue;
 
-      if (itemData == null || !isRuneCode(itemData.code)) {
+      if (itemData == null) {
         this.itemIgnore.add(itemKey);
         continue;
       }
 
       const loc = await unit.pPath.fetch(this.d2.process);
+      const itemUnitData = unit.pData.isValid ? await this.d2.readStrutAt(unit.pData.offset, D2rUnitDataItemStrut) : null;
+      const qualityId = itemUnitData?.quality ?? ItemQuality.NotApplicable;
       const itemJson: Diablo2ItemJson = {
         type: 'item',
         id: unit.unitId,
         updatedAt: Date.now(),
-        name: Diablo2Mpq.t(itemData.code) ?? itemData.code,
+        seenAt: Date.now(),
+        name: Diablo2Mpq.t(itemData.nameId) ?? itemData.code,
         code: itemData.code,
         x: loc.staticX,
         y: loc.staticY,
-        quality: { id: 0, name: 'Rune' },
+        quality: { id: qualityId, name: ItemQuality[qualityId] ?? 'Unknown' },
+        isEthereal: ((itemUnitData?.flags ?? 0) & ITEM_FLAG_ETHEREAL) !== 0,
+        isIdentified: ((itemUnitData?.flags ?? 0) & ITEM_FLAG_IDENTIFIED) !== 0,
+        isRuneWord: ((itemUnitData?.flags ?? 0) & ITEM_FLAG_RUNEWORD) !== 0,
       };
 
       this.state.trackItem(itemJson);
@@ -282,10 +292,6 @@ async function resolveDifficulty(
   if (process.argv.includes('--nightmare')) return Difficulty.Nightmare;
   if (process.argv.includes('--normal')) return Difficulty.Normal;
   return Difficulty.Hell;
-}
-
-function isRuneCode(code: string): boolean {
-  return /^r\d\d$/.test(code);
 }
 
 function resolveMapSeed(act: ActS, actMisc: ActMiscS | null, logger: LogType): number {

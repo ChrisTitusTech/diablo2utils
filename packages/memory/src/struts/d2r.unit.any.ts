@@ -1,3 +1,4 @@
+import { ItemDestination } from '@diablo2/data';
 import { bp, StrutInfer } from 'binparse';
 import { D2rActStrut } from './d2r.act.js';
 import { D2rArenaUnit, D2rPlayerTrade, D2rQuestData, D2rStatListStrut, D2rWaypointData } from './d2r.js';
@@ -5,6 +6,8 @@ import { D2rPathStrut } from './d2r.path.js';
 import { Pointer } from './pointer.js';
 
 const { lu32, at, u8, lu64 } = bp;
+
+const D2rItemDestination = bp.enum('D2rItemDestination', lu32, ItemDestination);
 
 export const D2rUnitDataPlayerStrut = bp.object('D2rUnitDataPlayerStrut', {
   name: bp.string(0x40), // 0x00
@@ -35,7 +38,8 @@ export const PointerUnitDataNpc = new Pointer(D2rUnitDataNpcStrut);
 
 export const D2rUnitDataItemStrut = bp.object('D2rUnitDataItemStrut', {
   quality: at(0x00, u8),
-  flags: at(0x18, u8),
+  destination: at(0x04, D2rItemDestination),
+  flags: at(0x18, lu32),
   uniqueId: at(0x34, u8),
 });
 D2rUnitDataItemStrut.setSize(0x35);
