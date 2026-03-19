@@ -1,7 +1,7 @@
 import { Diablo2State } from '@diablo2/core';
 import { ActUtil, Attribute, Difficulty, Diablo2Mpq, ItemQuality, UnitType } from '@diablo2/data';
 import { toHex } from 'binparse';
-import { Diablo2ItemJson } from 'packages/state/build/json.js';
+import { Diablo2ItemJson } from '@diablo2/state';
 import { Diablo2Process } from './d2.js';
 import { Diablo2Player } from './d2.player.js';
 import { id, Log, LogType } from './logger.js';
@@ -349,8 +349,10 @@ function toUint32(value: bigint | number): number {
   return typeof value === 'bigint' ? Number(value & UINT32_MASK) >>> 0 : value >>> 0;
 }
 
-export function dumpStats(stats: Map<Attribute, number>): void {
-  for (const stat of stats) {
-    console.log(toHex(stat[0]), Attribute[stat[0]], stat[1]);
+export function dumpStats(stats: Map<Attribute, number>, logger?: LogType): void {
+  for (const [code, value] of stats) {
+    const msg = `${toHex(code)} ${Attribute[code]} ${value}`;
+    if (logger) logger.debug({ code, name: Attribute[code], value }, 'Stat');
+    else console.log(msg);
   }
 }

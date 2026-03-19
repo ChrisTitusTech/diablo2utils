@@ -30,10 +30,12 @@ interface MapFetchDebugDetail {
   occurredAt: number;
 }
 
-process = typeof process === 'undefined' ? ({ env: {} } as any) : process;
+/** Provide a safe process.env shim for browser environments */
+const _process = typeof process !== 'undefined' ? process : ({ env: {} } as { env: Record<string, string | undefined> });
+
 /** Load and create tiles from a remote map host */
 export class Diablo2MapTiles {
-  static MapHost = typeof window !== 'undefined' ? '' : (process.env.MAP_HOST ?? 'https://diablo2.chard.dev');
+  static MapHost = typeof window !== 'undefined' ? '' : (_process.env.MAP_HOST ?? 'https://diablo2.chard.dev');
 
   static tiles = new LruCache<Promise<unknown>>(1024);
   static maps = new LruCache<Promise<LevelData>>(32);

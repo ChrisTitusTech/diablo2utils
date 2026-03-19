@@ -87,7 +87,7 @@ export const ScannerBuffer = {
   *buffer(buffer: Buffer, scanFor: Buffer): Generator<number> {
     for (let i = 0; i < buffer.length; i++) {
       const bytesLeft = buffer.length - i;
-      if (bytesLeft < scanFor.length) continue;
+      if (bytesLeft < scanFor.length) break;
 
       let matches = true;
       for (let j = 0; j < scanFor.length; j++) {

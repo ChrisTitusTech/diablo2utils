@@ -77,9 +77,9 @@ async function handleStatePost(req: express.Request, res: express.Response): Pro
   const difficulty = Number(body.difficulty);
   const act = Number(body.act);
   const levelId = Number(body.levelId);
-  if (!isNaN(difficulty)) currentGameState.difficulty = difficulty;
-  if (!isNaN(act)) currentGameState.act = act;
-  if (!isNaN(levelId)) currentGameState.levelId = levelId;
+  if (!isNaN(difficulty) && difficulty >= 0 && difficulty <= 2) currentGameState.difficulty = difficulty;
+  if (!isNaN(act) && act >= 0 && act <= 4) currentGameState.act = act;
+  if (!isNaN(levelId) && levelId >= 0) currentGameState.levelId = levelId;
 
   if (body.player === null) currentGameState.player = undefined;
   else if (body.player && typeof body.player === 'object') currentGameState.player = body.player;
@@ -87,13 +87,17 @@ async function handleStatePost(req: express.Request, res: express.Response): Pro
   if (Array.isArray(body.items)) currentGameState.items = body.items;
   if (Array.isArray(body.kills)) currentGameState.kills = body.kills;
 
-  await reconcileLevel();
-
+  // Set updatedAt and broadcast BEFORE reconcileLevel so the viewer gets
+  // immediate updates instead of waiting for the WINE map process.
   currentGameState.updatedAt = Date.now();
   broadcastState(currentGameState);
 
   Log.info({ seed, difficulty, act, levelId, hasPlayer: currentGameState.player != null }, 'State:Updated');
   res.status(200).json(currentGameState);
+
+  // Reconcile level in the background — if the level changes, the next
+  // POST cycle will pick it up and broadcast the corrected value.
+  reconcileLevel().catch((err) => Log.warn({ err }, 'State:ReconcileFailed'));
 }
 
 class Diablo2MapServer {
@@ -131,7 +135,6 @@ class Diablo2MapServer {
         }
       }
       req.log.info({ duration: Date.now() - startTime, status: res.statusCode }, req.url);
-      next();
     });
   }
 

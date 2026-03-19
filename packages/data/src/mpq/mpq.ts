@@ -29,6 +29,7 @@ export class Diablo2MpqData {
   }
 
   reset(): void {
+    this.basePath = '';
     this.lang = new Diablo2MpqLang(this);
     this.monsters = new Diablo2MpqMonsters(this);
     this.items = new Diablo2MpqItem(this);

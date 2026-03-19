@@ -9,6 +9,8 @@ import { Diablo2ItemJson } from '@diablo2/state';
 
 const { client, server } = PacketsPod;
 
+const RUNE_CODE_RE = /^r\d{2}$/;
+
 const PacketIgnore: Set<string> = new Set([
   server.GameLoading.name,
   server.GameObjectAssign.name,
@@ -176,7 +178,7 @@ export class Diablo2GameSession {
 
   isGoodItem(code: string, quality: ItemQuality): boolean {
     if (this.itemTrack.has(code)) return true;
-    if (code.match(/(r[0-9][0-9])/)) return true;
+    if (RUNE_CODE_RE.test(code)) return true;
     if (quality === ItemQuality.Set) return true;
     if (quality === ItemQuality.Unique) return true;
 

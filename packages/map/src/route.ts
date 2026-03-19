@@ -8,17 +8,17 @@ export interface Request extends express.Request {
 
 export type Response = express.Response;
 
-export class HttpError {
+export class HttpError extends Error {
   status: number;
-  message: string;
 
   constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
     this.status = status;
-    this.message = message;
   }
 }
 
-export interface Route<T = any> {
+export interface Route<T = unknown> {
   url: string;
   contentType?: string;
   process(req: Request, res?: Response): Promise<T>;

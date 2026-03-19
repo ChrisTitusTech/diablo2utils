@@ -31,39 +31,30 @@ export class Process {
       if (isNaN(pid)) continue;
 
       try {
-        const data = await fs.readFile(`/proc/${file}/status`);
-        const first = data.toString().split('\n')[0];
-        const fileName = first.split('\t')[1];
-        if (fileName.includes(name)) return pid;
-      } catch (e) {
-        // noop
-      }
-    }
-
-    // Fallback: search /proc/{pid}/cmdline for the process name.
-    // Under Wine/Proton the process comm name may differ from the executable
-    // (e.g. D2R.exe shows as "Main"), so we check the first argument (argv[0]).
-    for (const file of files) {
-      const pid = Number(file);
-      if (isNaN(pid)) continue;
-
-      try {
-        const [status, data] = await Promise.all([
+        const [status, cmdline] = await Promise.all([
           fs.readFile(`/proc/${file}/status`),
-          fs.readFile(`/proc/${file}/cmdline`),
+          fs.readFile(`/proc/${file}/cmdline`).catch(() => null),
         ]);
 
-        const argv = data.toString().split('\0').filter(Boolean);
+        const statusStr = status.toString();
+        const statusName = statusStr.split('\n')[0]?.split('\t')[1] ?? '';
+
+        // Fast path: exact status name match
+        if (statusName.includes(name)) return pid;
+
+        // Fallback: check cmdline for the process name.
+        // Under Wine/Proton the process comm name may differ from the executable
+        // (e.g. D2R.exe shows as "Main"), so we check the full command line.
+        if (cmdline == null) continue;
+        const argv = cmdline.toString().split('\0').filter(Boolean);
         if (argv.length === 0) continue;
 
         const joined = argv.join(' ');
         if (!joined.includes(name)) continue;
 
-        // cmdline fields are NUL-separated; argv[0] is the executable.
         // Prefer the actual Wine/Proton child process over wrappers like
         // gamescope, pressure-vessel, or the proton launcher itself.
         const argv0 = argv[0];
-        const statusName = status.toString().split('\n')[0]?.split('\t')[1] ?? '';
         const score =
           (/([^\\/]+)$/.exec(argv0)?.[1]?.toLowerCase() === name.toLowerCase() ? 100 : 0) +
           (statusName === 'Main' ? 50 : 0) +
@@ -114,6 +105,15 @@ export class Process {
     return memMaps;
   }
 
+  /** Close the file handle for this process */
+  async close(): Promise<void> {
+    if (this.fh != null) {
+      const fh = await this.fh;
+      await fh.close();
+      this.fh = null;
+    }
+  }
+
   /** Read a section of memory from this process */
   async read(offset: number, count: number): Promise<Buffer> {
     try {
@@ -150,8 +150,7 @@ export class Process {
         const buffer = await this.read(map.start, map.end - map.start);
         yield { buffer, offset: map.start, map: map };
       } catch (err) {
-        // console.trace({ err }, 'Scan:Failed');
-        break;
+        continue;
       }
     }
   }
@@ -162,21 +161,20 @@ export class Process {
     f?: FilterFunc,
   ): AsyncGenerator<{ buffer: Buffer; offset: number; map: ProcessMemoryMap }> {
     const maps = await this.loadMap();
-    maps.sort((a, b) => {
+    const sorted = [...maps].sort((a, b) => {
       const aStart = Math.abs(a.start - offset);
       const bStart = Math.abs(b.start - offset);
       return aStart - bStart;
     });
 
-    for (const map of maps) {
+    for (const map of sorted) {
       if (f != null && f(map) === false) continue;
 
       try {
         const buffer = await this.read(map.start, map.end - map.start);
         yield { buffer, offset: map.start, map: map };
       } catch (err) {
-        // console.trace({ err, offset }, 'Scan:Distance');
-        break;
+        continue;
       }
     }
   }
@@ -185,14 +183,13 @@ export class Process {
   async *scanReverse(f?: FilterFunc): AsyncGenerator<{ buffer: Buffer; offset: number; map: ProcessMemoryMap }> {
     const maps = await this.loadMap();
 
-    for (const map of maps.reverse()) {
+    for (const map of [...maps].reverse()) {
       if (f != null && f(map) === false) continue;
       try {
         const buffer = await this.read(map.start, map.end - map.start);
         yield { buffer, offset: map.start, map: map };
       } catch (err) {
-        // console.trace({ err }, 'Scan:Reverse');
-        break;
+        continue;
       }
     }
   }

@@ -3,6 +3,8 @@ import { Diablo2MpqData } from './mpq.js';
 export const ExpansionOffset = 20000;
 export const PatchOffset = 10000;
 export const ClassicOffset = 0;
+/** Sentinel index used by D2 for empty/invalid string table entries */
+const InvalidStringIndex = 5382;
 
 export class Diablo2MpqLangTbl {
   /** Translations by key */
@@ -43,8 +45,8 @@ export class Diablo2MpqLang {
   }
 
   getByIndex(index: number): string | undefined {
-    // This is a commonly used bad key?
-    if (index === 5382) return undefined;
+    // Index 5382 is a sentinel value used by D2 for empty/invalid string table entries
+    if (index === InvalidStringIndex) return undefined;
     if (index >= ExpansionOffset) return this.expansion.get(index - ExpansionOffset);
     if (index >= PatchOffset) return this.patch.get(index - PatchOffset);
     return this.classic.get(index);

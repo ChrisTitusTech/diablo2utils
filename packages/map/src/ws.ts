@@ -49,11 +49,15 @@ export function setupWebSocket(server: http.Server): void {
 export function broadcastState(state: GameState): void {
   if (clients.size === 0) return;
   const json = JSON.stringify(state);
+  const MaxBufferedBytes = 1024 * 64; // 64KB backpressure threshold
   for (const ws of clients) {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(json, (err) => {
-        if (err) Log.warn({ err: String(err) }, 'WS:SendError');
-      });
+    if (ws.readyState !== WebSocket.OPEN) continue;
+    if (ws.bufferedAmount > MaxBufferedBytes) {
+      Log.warn({ buffered: ws.bufferedAmount }, 'WS:SlowClient:Skipping');
+      continue;
     }
+    ws.send(json, (err) => {
+      if (err) Log.warn({ err: String(err) }, 'WS:SendError');
+    });
   }
 }

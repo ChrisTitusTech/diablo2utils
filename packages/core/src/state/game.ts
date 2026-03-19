@@ -37,7 +37,7 @@ export class Diablo2State {
     this.log = log;
   }
 
-  _dirtyTimeout?: number | NodeJS.Timeout;
+  _dirtyTimeout?: ReturnType<typeof setTimeout>;
   dirty(): void {
     this.updatedAt = Date.now();
 
@@ -196,7 +196,7 @@ export class Diablo2State {
     }
 
     if (u.name !== kill.name) {
-      this.log.warn({ kill, unit: u.name }, 'Kill:Name:missmatch');
+      this.log.warn({ kill, unit: u.name }, 'Kill:Name:mismatch');
     }
   }
 
@@ -277,7 +277,7 @@ export class Diablo2State {
       kills: [...this.kills.values()],
     };
   }
-  filterOld(items: Map<unknown, GameJson.Diablo2BaseGameJson>): number {
+  filterOld(items: Map<number, GameJson.Diablo2BaseGameJson>): number {
     const player = this.player;
 
     const timeNow = Date.now();

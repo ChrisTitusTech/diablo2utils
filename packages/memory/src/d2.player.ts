@@ -140,6 +140,7 @@ export class Diablo2Player {
 
   async getNearBy(path: PathS, logger: LogType): Promise<Map<number, UnitAnyS>> {
     const objs = new Map<number, UnitAnyS>();
+    const MaxLinkedListIterations = 1000;
 
     const rooms = await this.getRooms(path, logger);
 
@@ -148,7 +149,12 @@ export class Diablo2Player {
       let currentUnit = await this.d2.readStrutAt(r.pUnitFirst.offset, D2rUnitStrut);
       if (TrackUnitTypes.has(currentUnit.type)) objs.set(currentUnit.unitId, currentUnit);
 
+      let iterations = 0;
       while (isValidPointer(currentUnit.pRoomNext)) {
+        if (++iterations > MaxLinkedListIterations) {
+          logger.warn({ room: r.pUnitFirst.offset, iterations }, 'NearBy:LinkedListTooLong');
+          break;
+        }
         currentUnit = await this.d2.readStrutAt(currentUnit.pRoomNext, D2rUnitStrut);
         if (TrackUnitTypes.has(currentUnit.type)) objs.set(currentUnit.unitId, currentUnit);
       }

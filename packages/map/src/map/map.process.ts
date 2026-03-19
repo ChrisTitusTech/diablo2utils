@@ -1,4 +1,4 @@
-import { Diablo2Level, Diablo2LevelNpcSuper, Diablo2MpqData } from '@diablo2/data';
+import { Diablo2Level, Diablo2LevelNpcSuper, Diablo2MpqData, LruCache } from '@diablo2/data';
 import { Diablo2MpqLoader } from '@diablo2/bintools';
 import { toHex } from 'binparse';
 import { ChildProcess, spawn } from 'child_process';
@@ -8,7 +8,6 @@ import PLimit from 'p-limit';
 import { createInterface } from 'readline';
 import { Log, LogType } from '../logger.js';
 import { run } from './child.process.js';
-import { LruCache } from './lru.js';
 import { Diablo2MapGenMessage, MapGenMessageInfo, MapGenMessageMap } from './map.js';
 import { F_OK } from 'constants';
 
@@ -37,9 +36,9 @@ export function isLogMessage(x: unknown): x is LogMessage {
   return false;
 }
 
-async function timeOut(message: string, timeout: number): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(`${message} Timeout after ${timeout}ms`), timeout);
+async function timeOut(message: string, timeout: number): Promise<never> {
+  return new Promise((_resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${message} Timeout after ${timeout}ms`)), timeout);
     timer.unref();
   });
 }
@@ -47,7 +46,8 @@ async function timeOut(message: string, timeout: number): Promise<void> {
 function getJson<T>(s: string): T | null {
   try {
     return JSON.parse(s);
-  } catch (e) {
+  } catch {
+    Log.trace({ line: s.slice(0, 200) }, 'MapProcess:JsonParseFailed');
     return null;
   }
 }
@@ -104,40 +104,39 @@ export class Diablo2MapProcess {
 
     const args = [this.mapCommand, Diablo2Path];
     log.info({ proc: this.id, wineArgs: args }, 'MapProcess:Starting');
-    return new Promise(async (resolve) => {
-      const proc = spawn(WineCommand, args, { cwd, env: { WINEPREFIX: process.env['WINEPREFIX'], WINEDEBUG: '-all' } });
-      if (proc == null || proc.stdout == null) throw new Error('Failed to start command');
-      this.process = proc;
-      proc.stderr.on('data', (data) => {
-        const line = data.toString().trim();
-        if (line.includes('FS volume label and serial are not available')) return;
-        Log.debug({ proc: this.id, data: line }, 'MapProcess:stderr');
-        if (line.includes('We got a big Error here')) this.stop(log);
-      });
-      proc.on('error', (error) => {
-        log.fatal({ proc: this.id, error }, 'MapProcess:Died');
-        inter.close();
-        this.process = null;
-      });
-      proc.on('close', (exitCode) => {
-        inter.close();
-        this.process = null;
-        this.events.emit('close');
-        if (exitCode == null) return;
-        if (exitCode > 0) log.fatal({ proc: this.id, exitCode }, 'MapProcess:Closed');
-      });
 
-      log.info({ proc: this.id, processId: this.process.pid }, 'MapProcess:Started');
-      const inter = createInterface(proc.stdout).on('line', (line): unknown => {
-        const json = getJson<Diablo2MapGenMessage | LogMessage>(line);
-        if (json == null) return;
-        if (isLogMessage(json)) return this.events.emit('log', json);
-        if (json.type) return this.events.emit(json.type, json);
-        return;
-      });
-      await this.once('init');
-      resolve();
+    const proc = spawn(WineCommand, args, { cwd, env: { WINEPREFIX: process.env['WINEPREFIX'], WINEDEBUG: '-all' } });
+    if (proc == null || proc.stdout == null) throw new Error('Failed to start command');
+    this.process = proc;
+
+    proc.stderr.on('data', (data: Buffer) => {
+      const line = data.toString().trim();
+      if (line.includes('FS volume label and serial are not available')) return;
+      Log.debug({ proc: this.id, data: line }, 'MapProcess:stderr');
+      if (line.includes('We got a big Error here')) this.stop(log);
     });
+
+    const inter = createInterface(proc.stdout).on('line', (line): void => {
+      const json = getJson<Diablo2MapGenMessage | LogMessage>(line);
+      if (json == null) return;
+      if (isLogMessage(json)) { this.events.emit('log', json); return; }
+      if (json.type) { this.events.emit(json.type, json); return; }
+    });
+
+    proc.on('error', (error) => {
+      log.fatal({ proc: this.id, error }, 'MapProcess:Died');
+      inter.close();
+      this.process = null;
+    });
+    proc.on('close', (exitCode) => {
+      inter.close();
+      this.process = null;
+      this.events.emit('close');
+      if (exitCode != null && exitCode > 0) log.fatal({ proc: this.id, exitCode }, 'MapProcess:Closed');
+    });
+
+    log.info({ proc: this.id, processId: this.process.pid }, 'MapProcess:Started');
+    await this.once('init');
   }
 
   async once<T extends Diablo2MapGenMessage>(e: T['type'], cb?: () => void): Promise<T> {
@@ -210,15 +209,20 @@ export class Diablo2MapProcess {
     };
 
     return await new Promise((resolve, reject) => {
-      const errorHandle = (err: unknown): void => {
+      const cleanup = (): void => {
         this.events.off('map', newMap);
+        this.events.off('close', errorHandle);
+        this.events.off('log', logLine);
+      };
+      const errorHandle = (err: unknown): void => {
+        cleanup();
         log.info({ proc: this.id, seed: toHex(seed, 8), difficulty, attempt, err }, 'GenerateMap:Error');
         if (attempt < MaxAttempts) {
           this.getMaps(seed, difficulty, actId, log, attempt + 1)
             .then(resolve)
             .catch(reject);
         } else {
-          console.log('Reject', { attempt, MaxAttempts });
+          log.error({ attempt, MaxAttempts }, 'GenerateMap:MaxAttemptsExceeded');
           reject(err);
         }
       };
@@ -230,10 +234,8 @@ export class Diablo2MapProcess {
       this.events.on('map', newMap);
       this.events.on('log', logLine);
       this.events.once('done', () => {
-        this.events.off('map', newMap);
-        this.events.off('close', errorHandle);
-        this.events.off('log', logLine);
-        log?.trace({ proc: this.id, count: Object.keys(maps).length }, 'GenerateMap:Generated');
+        cleanup();
+        log?.trace({ proc: this.id, count: maps.size }, 'GenerateMap:Generated');
         resolve([...maps.values()]);
       });
       this.process?.stdin?.write(`$map\n`);
