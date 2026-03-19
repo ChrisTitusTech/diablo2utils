@@ -230,38 +230,56 @@ export class Diablo2MapViewer {
     if (!state) return;
 
     if (state.seed <= 0) {
-      const invalidHasPlayer = !!state.player && state.player.x > 0 && state.player.y > 0;
-      const hasValidServerState = this.debugState.server.seed > 0 && this.debugState.server.updatedAt > 0;
-      if (hasValidServerState) {
-        this.debugState.server.ignoredInvalidAt = Date.now();
-        this.debugState.server.ignoredInvalidSource = source;
-        this.debugState.server.ignoredInvalidSeed = state.seed ?? 0;
-        this.debugState.server.ignoredInvalidUpdatedAt = state.updatedAt ?? 0;
-        this.debugState.server.ignoredInvalidDifficulty = state.difficulty ?? 0;
-        this.debugState.server.ignoredInvalidAct = state.act ?? 0;
-      } else {
+      // seed === 0 with a valid updatedAt signals the game has ended.
+      // Clear the viewer state so it stops showing the old map and waits
+      // for the next game.
+      const isGameEndedSignal = (state.updatedAt ?? 0) > this.lastStateUpdatedAt;
+      if (isGameEndedSignal) {
+        this.lastStateUpdatedAt = state.updatedAt;
+        this.ctx.state.map.id = 0;
+        this.ctx.state.map.levelId = 0;
+        this.ctx.state.player.x = 0;
+        this.ctx.state.player.y = 0;
+        this.ctx.state.units = [];
+        this.ctx.state.items = [];
+        this.hasPlayer = false;
+        this.playerStatus = 'Waiting for game';
+
         this.debugState.server = {
           source,
           receivedAt: Date.now(),
           updatedAt: state.updatedAt ?? 0,
-          seed: state.seed ?? 0,
+          seed: 0,
           difficulty: state.difficulty ?? this.debugState.server.difficulty ?? 0,
           act: state.act ?? this.debugState.server.act ?? 0,
           resolvedAct: state.act ?? this.debugState.server.resolvedAct ?? 0,
-          reportedLevelId: state.levelId ?? 0,
-          playerName: state.player?.name ?? this.debugState.server.playerName,
-          playerX: state.player?.x ?? 0,
-          playerY: state.player?.y ?? 0,
-          playerLife: state.player?.life ?? 0,
-          hasPlayer: invalidHasPlayer,
-          ignoredInvalidAt: Date.now(),
-          ignoredInvalidSource: source,
-          ignoredInvalidSeed: state.seed ?? 0,
-          ignoredInvalidUpdatedAt: state.updatedAt ?? 0,
-          ignoredInvalidDifficulty: state.difficulty ?? 0,
-          ignoredInvalidAct: state.act ?? 0,
+          reportedLevelId: 0,
+          playerName: this.debugState.server.playerName ?? '',
+          playerX: 0,
+          playerY: 0,
+          playerLife: 0,
+          hasPlayer: false,
+          ignoredInvalidAt: 0,
+          ignoredInvalidSource: '',
+          ignoredInvalidSeed: 0,
+          ignoredInvalidUpdatedAt: 0,
+          ignoredInvalidDifficulty: 0,
+          ignoredInvalidAct: 0,
         };
+        this.recordDebugEvent(
+          'state:game-ended',
+          `Game ended — clearing map (via ${source.toUpperCase()})`,
+          { updatedAt: state.updatedAt },
+          'info',
+        );
+        this.refreshViewerDebugState();
+        this.evaluateSyncIssues();
+        this.updateDebugDom();
+        this.update();
+        return;
       }
+
+      // Stale or initial seed=0 messages before any game is active — ignore.
       this.recordDebugEvent(
         'state:invalid-seed',
         `Ignoring ${source.toUpperCase()} state with invalid seed`,

@@ -67,8 +67,24 @@ async function handleStatePost(req: express.Request, res: express.Response): Pro
   }
 
   const seed = Number(body.seed);
-  if (isNaN(seed) || seed <= 0) {
+  if (isNaN(seed) || seed < 0) {
     res.status(422).json({ message: 'Invalid seed' });
+    return;
+  }
+
+  // seed === 0 signals "game ended" — clear the state so the viewer
+  // stops showing stale map data and waits for a new game.
+  if (seed === 0) {
+    currentGameState.seed = 0;
+    currentGameState.player = undefined;
+    currentGameState.units = [];
+    currentGameState.items = [];
+    currentGameState.kills = [];
+    currentGameState.levelId = 0;
+    currentGameState.updatedAt = Date.now();
+    broadcastState(currentGameState);
+    Log.info('State:GameEnded');
+    res.status(200).json(currentGameState);
     return;
   }
 

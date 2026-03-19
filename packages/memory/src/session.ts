@@ -18,6 +18,22 @@ const ITEM_FLAG_IDENTIFIED = 0x0000_0010;
 const ITEM_FLAG_ETHEREAL = 0x0400_0000;
 const ITEM_FLAG_RUNEWORD = 0x4000_0000;
 
+/** Item codes for monster body parts / gore – visual debris, not real loot */
+const BODY_PART_CODES: ReadonlySet<string> = new Set([
+  'hrt', // Heart
+  'brz', // Brain
+  'jaw', // Jawbone
+  'eyz', // Eye
+  'hrn', // Horn
+  'tal', // Tail
+  'flg', // Flag
+  'fng', // Fang
+  'qll', // Quill
+  'sol', // Soul
+  'scz', // Scalp
+  'spe', // Spleen
+]);
+
 export class Diablo2GameSessionMemory {
   state: Diablo2State;
   d2: Diablo2Process;
@@ -31,6 +47,18 @@ export class Diablo2GameSessionMemory {
   onMapChange?: (seed: number, difficulty: Difficulty, act: number) => void;
 
   itemIgnore = new Set<string>();
+
+  /**
+   * Counts consecutive ticks where the player pointer validates but position
+   * is (0, 0).  After a threshold the player is considered "lost" (e.g. the
+   * user returned to the main menu while the stale UnitAny pointer still
+   * resolves).
+   */
+  private _noPositionTicks = 0;
+
+  /** Number of consecutive no-position ticks before we treat the pointer as
+   *  stale and trigger a player-lost event.  4 ticks ≈ 1 second. */
+  private static readonly NO_POSITION_THRESHOLD = 4;
 
   constructor(proc: Diablo2Process, playerName: string) {
     this.d2 = proc;
@@ -51,6 +79,17 @@ export class Diablo2GameSessionMemory {
       dirty = true;
     }
 
+    // Reset the map seed so the system doesn't stay stuck on the old game.
+    // When the player enters a new game the seed will be re-detected.
+    const mapState = this.state.map as typeof this.state.map & { levelId?: number };
+    if (mapState.id !== 0) {
+      mapState.id = 0;
+      mapState.act = 0;
+      mapState.difficulty = 0;
+      mapState.levelId = 0;
+      dirty = true;
+    }
+
     if (this.state.units.size > 0) {
       this.state.units.clear();
       dirty = true;
@@ -60,6 +99,13 @@ export class Diablo2GameSessionMemory {
       this.state.items.clear();
       dirty = true;
     }
+
+    if (this.state.kills.size > 0) {
+      this.state.kills.clear();
+      dirty = true;
+    }
+
+    this.itemIgnore.clear();
 
     if (dirty) this.state.dirty();
     if (!hadTrackedPlayer) return;
@@ -142,6 +188,20 @@ export class Diablo2GameSessionMemory {
     }
 
     const path = await obj.getPath(player, logger);
+
+    // When the player quits a game the UnitAny pointer may still resolve
+    // (D2R doesn't zero it out immediately) but the position becomes (0, 0).
+    // Skip processing stale data and, after several consecutive ticks,
+    // consider the player lost so we can scan for a new one.
+    if (path.x === 0 && path.y === 0) {
+      this._noPositionTicks++;
+      if (this._noPositionTicks >= Diablo2GameSessionMemory.NO_POSITION_THRESHOLD) {
+        this.markPlayerLost(logger, 'NoPosition');
+      }
+      return;
+    }
+    this._noPositionTicks = 0;
+
     const act = await obj.getAct(player, logger);
     const stats = await obj.getStats(player, logger);
     const levelId = await obj.getLevelId(path, logger);
@@ -205,6 +265,19 @@ export class Diablo2GameSessionMemory {
         continue;
       }
 
+      // Skip monster body parts (visual debris, not real loot)
+      if (BODY_PART_CODES.has(itemData.code)) {
+        this.itemIgnore.add(itemKey);
+        continue;
+      }
+
+      // Skip items with no localized name (nameId sentinel 5382 = unused/placeholder)
+      const itemName = Diablo2Mpq.t(itemData.nameId);
+      if (itemName == null) {
+        this.itemIgnore.add(itemKey);
+        continue;
+      }
+
       const loc = await unit.pPath.fetch(this.d2.process);
       const itemUnitData = unit.pData.isValid ? await this.d2.readStrutAt(unit.pData.offset, D2rUnitDataItemStrut) : null;
       const qualityId = itemUnitData?.quality ?? ItemQuality.NotApplicable;
@@ -213,7 +286,7 @@ export class Diablo2GameSessionMemory {
         id: unit.unitId,
         updatedAt: Date.now(),
         seenAt: Date.now(),
-        name: Diablo2Mpq.t(itemData.nameId) ?? itemData.code,
+        name: itemName,
         code: itemData.code,
         x: loc.staticX,
         y: loc.staticY,
