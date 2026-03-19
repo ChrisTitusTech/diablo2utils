@@ -179,6 +179,71 @@ export class Process {
     }
   }
 
+  /**
+   * Find the base (lowest) address of a named PE module loaded via Wine/Proton.
+   * Reads /proc/PID/maps without filtering so both r-x and rw sections are visible.
+   */
+  async findModuleBase(moduleName: string): Promise<number | null> {
+    const data = await fs.readFile(`/proc/${this.pid}/maps`);
+    const lines = data.toString().trim().split('\n');
+    const lowerModule = moduleName.toLowerCase();
+
+    for (const line of lines) {
+      if (!line.toLowerCase().includes(lowerModule)) continue;
+      const startHex = line.split('-')[0].trim();
+      return parseInt(startHex, 16);
+    }
+    return null;
+  }
+
+  /**
+   * Fallback: find any .exe module mapped at file offset 0.
+   * Under Wine/Proton, the PE is file-backed and the path ends with .exe.
+   */
+  async findExeModuleInMaps(): Promise<number | null> {
+    const data = await fs.readFile(`/proc/${this.pid}/maps`);
+    const lines = data.toString().trim().split('\n');
+
+    for (const line of lines) {
+      const parts = line.trim().split(/\s+/);
+      if (parts.length < 6) continue;
+      const offset = parts[2];
+      const path = parts[parts.length - 1];
+
+      // Look for file-backed mappings at offset 0 that are .exe files
+      if (offset !== '00000000' && offset !== '0000000000000000') continue;
+      if (path.toLowerCase().endsWith('.exe')) {
+        const startHex = parts[0].split('-')[0];
+        return parseInt(startHex, 16);
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Return debug info about mapped regions for troubleshooting module base resolution.
+   */
+  async getMapsDebugInfo(): Promise<string> {
+    try {
+      const data = await fs.readFile(`/proc/${this.pid}/maps`);
+      const lines = data.toString().trim().split('\n');
+      // Return summary: total lines, unique file paths, and any .exe entries
+      const paths = new Set<string>();
+      const exeLines: string[] = [];
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 6) {
+          const path = parts[parts.length - 1];
+          if (path.startsWith('/')) paths.add(path);
+          if (path.toLowerCase().endsWith('.exe')) exeLines.push(line);
+        }
+      }
+      return `totalLines=${lines.length} uniquePaths=${paths.size} exeEntries=${exeLines.length}${exeLines.length > 0 ? ' exe=' + exeLines[0] : ''}`;
+    } catch {
+      return 'unreadable';
+    }
+  }
+
   /** Scan memory backwards */
   async *scanReverse(f?: FilterFunc): AsyncGenerator<{ buffer: Buffer; offset: number; map: ProcessMemoryMap }> {
     const maps = await this.loadMap();

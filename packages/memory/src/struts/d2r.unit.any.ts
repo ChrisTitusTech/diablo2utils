@@ -1,4 +1,3 @@
-import { ItemDestination } from '@diablo2/data';
 import { bp, StrutInfer } from 'binparse';
 import { D2rActStrut } from './d2r.act.js';
 import { D2rArenaUnit, D2rPlayerTrade, D2rQuestData, D2rStatListStrut, D2rWaypointData } from './d2r.js';
@@ -6,8 +5,6 @@ import { D2rPathStrut } from './d2r.path.js';
 import { Pointer } from './pointer.js';
 
 const { lu32, at, u8, lu64 } = bp;
-
-const D2rItemDestination = bp.enum('D2rItemDestination', lu32, ItemDestination);
 
 export const D2rUnitDataPlayerStrut = bp.object('D2rUnitDataPlayerStrut', {
   name: bp.string(0x40), // 0x00
@@ -36,13 +33,30 @@ D2rUnitDataNpcStrut.setSize(0x1b);
 
 export const PointerUnitDataNpc = new Pointer(D2rUnitDataNpcStrut);
 
+/**
+ * D2R ItemData struct — offsets aligned with PrimeMH.
+ *
+ * PrimeMH layout:
+ *   0x00  quality        u32
+ *   0x04  lowSeed        u32
+ *   0x08  highSeed       u32
+ *   0x0C  dwOwnerId      u32
+ *   0x10  initSeed       u32
+ *   0x14  commandFlags   u32
+ *   0x18  flags          u32
+ *   0x34  fileText       u32  (unique/set id)
+ *   0x54  bodyLoc        u8
+ *   0x55  invPage        u8
+ */
 export const D2rUnitDataItemStrut = bp.object('D2rUnitDataItemStrut', {
-  quality: at(0x00, u8),
-  destination: at(0x04, D2rItemDestination),
+  quality: at(0x00, lu32),
+  dwOwnerId: at(0x0c, lu32),
   flags: at(0x18, lu32),
-  uniqueId: at(0x34, u8),
+  uniqueOrSetId: at(0x34, lu32),
+  bodyLoc: at(0x54, u8),
+  invPage: at(0x55, u8),
 });
-D2rUnitDataItemStrut.setSize(0x35);
+D2rUnitDataItemStrut.setSize(0x56);
 
 export const PointerUnitDataItem = new Pointer(D2rUnitDataItemStrut);
 

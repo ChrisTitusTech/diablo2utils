@@ -129,7 +129,9 @@ export class Diablo2GameSessionMemory {
       } catch (err) {
         logger.error({ d2Proc: this.d2.process.pid, err }, 'Session:Error');
         errorCount++;
-        await sleep(this.tickSpeed * errorCount);
+        // Cap backoff at 5× tick speed to avoid updates stalling indefinitely
+        const backoffMultiplier = Math.min(errorCount, 5);
+        await sleep(this.tickSpeed * backoffMultiplier);
       }
     }
   }
@@ -248,11 +250,12 @@ export class Diablo2GameSessionMemory {
 
     syncPlayerState(this.state.player, this.playerName, stats, this.state);
 
-    const units = await obj.getNearBy(path, logger);
+    // Use hash-table based item enumeration (matches PrimeMH / d2r-mapview).
+    // This walks item_ptrs[128] → Unit.pNext chains instead of the old
+    // room-based traversal which used unreliable pUnitFirst / pRoomNext offsets.
+    const units = await this.d2.getGroundItems(logger);
     for (const unit of units.values()) {
-      if (unit.type !== UnitType.Item) continue;
-      // mode 3 = on ground; skip inventory, equipped, belt, cursor, socketed items
-      if (unit.mode !== 3) continue;
+      // type and mode are already filtered inside getGroundItems()
 
       const itemData = Diablo2Mpq.items.byIndex[unit.txtFileNo];
       const itemKey = `${unit.unitId}-${unit.txtFileNo}`;
