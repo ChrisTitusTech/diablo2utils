@@ -94,7 +94,9 @@
       const response = await fetch('/v1/state', { cache: 'no-store' });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const payload = await response.json();
-      state.items = Array.isArray(payload.items) ? payload.items : [];
+      const allItems = Array.isArray(payload.items) ? payload.items : [];
+      // Only show actual ground drops (items with valid map coordinates)
+      state.items = allItems.filter(function (item) { return item.x != null && item.y != null && (item.x > 0 || item.y > 0); });
       render();
       setExportStatus('', 'ok');
     } catch (error) {

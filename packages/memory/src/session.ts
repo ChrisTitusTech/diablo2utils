@@ -191,6 +191,8 @@ export class Diablo2GameSessionMemory {
     const units = await obj.getNearBy(path, logger);
     for (const unit of units.values()) {
       if (unit.type !== UnitType.Item) continue;
+      // mode 3 = on ground; skip inventory, equipped, belt, cursor, socketed items
+      if (unit.mode !== 3) continue;
 
       const itemData = Diablo2Mpq.items.byIndex[unit.txtFileNo];
       const itemKey = `${unit.unitId}-${unit.txtFileNo}`;
