@@ -34,6 +34,11 @@ export class Diablo2Process {
     this.process = proc;
   }
 
+  /** Clear the cached module base so it will be re-detected on next access. */
+  resetBase(): void {
+    this._d2rBase = null;
+  }
+
   /** Resolve the D2R.exe module base address (cached after first call). */
   async getD2RBase(logger: LogType): Promise<number> {
     if (this._d2rBase != null) return this._d2rBase;
@@ -164,7 +169,67 @@ export class Diablo2Process {
     return new Diablo2Process(new Process(pid));
   }
 
-  async scanForPlayer(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
+  /**
+   * Fast player lookup using the unit hash table.
+   * Walks the Player (type=0) buckets looking for a unit whose
+   * PlayerData.name matches the target player name.
+   * Much faster than full memory scan — completes in milliseconds.
+   */
+  async scanForPlayerInHashTable(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
+    let base: number;
+    try {
+      base = await this.getD2RBase(logger);
+    } catch {
+      return null; // module base not found yet
+    }
+
+    // Player type = 0, so the player array is at the start of the hash table
+    const playerHashAddr = base + UNIT_TABLE_OFFSET;
+
+    let bucketBuf: Buffer;
+    try {
+      bucketBuf = await this.process.read(playerHashAddr, HASH_BUCKET_COUNT * HASH_BUCKET_SIZE);
+    } catch {
+      return null;
+    }
+
+    const MaxChainLength = 50;
+    for (let i = 0; i < HASH_BUCKET_COUNT; i++) {
+      const lo = bucketBuf.readUInt32LE(i * 8);
+      const hi = bucketBuf.readUInt32LE(i * 8 + 4);
+      let unitPtr = lo + hi * 0x100000000;
+
+      let chainLen = 0;
+      while (unitPtr > 0x110000 && unitPtr < 0x7fffffff0000) {
+        if (++chainLen > MaxChainLength) break;
+
+        try {
+          const unit = await this.readStrutAt(unitPtr, D2rUnitStrut);
+          if (unit.type === UnitType.Player && unit.pData.isValid) {
+            const playerData = await this.readStrutAt(unit.pData.offset, D2rUnitDataPlayerStrut);
+            const name = playerData.name.split('\0')[0];
+            if (name === playerName && Pointer.isPointersValid(unit) !== 0) {
+              this.lastOffset.player = unitPtr;
+              this.lastOffset.name = unit.pData.offset;
+              logger.info(
+                { unit: toHex(unitPtr), name: toHex(unit.pData.offset) },
+                'Player:HashTable:Found',
+              );
+              return new Diablo2Player(this, unitPtr);
+            }
+          }
+          unitPtr = unit.pNext;
+        } catch {
+          break;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  async scanForPlayer(playerName: string, logger: LogType, skipSlowScan = false): Promise<Diablo2Player | null> {
+    // Strategy 1: Quick check of the last known player offset
     if (this.lastOffset.name > 0) {
       logger.info({ lastGoodAddress: this.lastOffset }, 'Offsets:Previous');
 
@@ -176,6 +241,20 @@ export class Diablo2Process {
       }
     }
 
+    // Strategy 2: Fast hash-table lookup (player type = 0)
+    const hashResult = await this.scanForPlayerInHashTable(playerName, logger);
+    if (hashResult != null) return hashResult;
+
+    // Skip the slow scan during re-acquisition — the hash table scan will find
+    // the player once its pointers become valid in the new game. Retrying via
+    // the waitForPlayer loop (with its 500ms→5s backoff) is far faster than
+    // scanning all process memory for stale player-name strings.
+    if (skipSlowScan) {
+      logger.info({}, 'Player:HashTable:NotReady (will retry)');
+      return null;
+    }
+
+    // Strategy 3: Slow full memory scan (fallback — initial startup only)
     for await (const mem of this.process.scanDistance(this.lastOffset.name)) {
       for (const nameOffset of ScannerBuffer.text(mem.buffer, playerName, 0x40)) {
         const playerNameOffset = nameOffset + mem.map.start;

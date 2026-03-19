@@ -108,6 +108,29 @@ export class Diablo2GameSessionMemory {
 
     this.itemIgnore.clear();
 
+    // Reset the player identity so addPlayer() can assign the new unitId.
+    // Without this, the state.player getter returns the OLD player entry
+    // (with x=0, y=0) and the server thinks hasPlayer=false.
+    this.state.playerId = -1;
+    if (this.state.players.size > 0) {
+      this.state.players.clear();
+      dirty = true;
+    }
+
+    // Reset no-position counter so a stale count doesn't immediately
+    // trigger another NoPosition loss after re-acquisition.
+    this._noPositionTicks = 0;
+
+    // Reset cached memory offsets so scanForPlayer doesn't cling to stale data.
+    // The hash-table scan doesn't need these, and the slow fallback scan will
+    // start fresh instead of wasting time near the old (now invalid) addresses.
+    this.d2.lastOffset = { name: 0, player: 0, seed: 0 };
+
+    // Force re-detection of the D2R.exe module base. If the user restarted
+    // the game process, the old cached address would be wrong and the
+    // hash-table scan would silently fail.
+    this.d2.resetBase();
+
     if (dirty) this.state.dirty();
     if (!hadTrackedPlayer) return;
 
@@ -169,7 +192,7 @@ export class Diablo2GameSessionMemory {
         continue;
       }
 
-      this.player = await this.d2.scanForPlayer(this.playerName, logger);
+      this.player = await this.d2.scanForPlayer(this.playerName, logger, true);
       if (this.player == null) continue;
       return this.player;
     }
@@ -286,13 +309,25 @@ export class Diablo2GameSessionMemory {
         continue;
       }
 
+      // Fast act-based filter: items from a different act definitely aren't
+      // in the current level.  unit.actId is already parsed from the hash
+      // table scan — no extra memory reads required.
+      if (unit.actId !== currentAct) {
+        this.itemIgnore.add(itemKey);
+        continue;
+      }
+
       const loc = await unit.pPath.fetch(this.d2.process);
 
-      // Filter by current level: the hash table contains ground items from ALL
-      // areas (e.g. a Key left in the Tower, Grand Charms in another area).
-      // Resolve item.pPath → pRoom → pRoomExt → pLevel → levelId and skip
-      // any item that is not in the player's current level.
-      if (loc.pRoom.isValid && levelId > 0) {
+      // Filter by current level: try to resolve the item's room chain to
+      // determine its levelId.  Items use a StaticPath whose pRoom field at
+      // offset 0x20 may not be populated (different layout from the player's
+      // DynamicPath) or may point to a stale / unloaded room.  Because of
+      // this, we can only EXCLUDE items where the chain resolves successfully
+      // and the levelId is confirmed to be different.  If we can't resolve
+      // the chain we allow the item through — the act filter above already
+      // eliminates the most obvious cross-area phantoms.
+      if (levelId > 0 && loc.pRoom.isValid) {
         try {
           const room = await this.d2.readStrutAt(loc.pRoom.offset, D2rRoomStrut);
           if (room.pRoomExt.isValid) {
@@ -306,9 +341,7 @@ export class Diablo2GameSessionMemory {
             }
           }
         } catch {
-          // Can't resolve item level — skip to be safe
-          this.itemIgnore.add(itemKey);
-          continue;
+          // Can't resolve item level — allow through
         }
       }
 
