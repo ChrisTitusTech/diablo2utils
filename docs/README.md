@@ -23,9 +23,15 @@ Almost every D2R patch can shift struct field offsets. The items most likely to 
 
 ### PrimeMH Byte Pattern Scanning
 
-The fastest way to find the new `UNIT_TABLE_OFFSET` after a patch is PrimeMH's byte pattern scanning approach — search D2R.exe's code section for known instruction sequences and resolve RIP-relative displacements. See [d2r-memory-offsets.md — Byte Scan Patterns](d2r-memory-offsets.md#byte-scan-patterns) and [patching-guide.md — Method B](patching-guide.md#method-b-byte-pattern-scanning-primemh-approach) for details.
+The fastest way to find the new `UNIT_TABLE_OFFSET` after a patch is byte pattern scanning — search D2R.exe's code section for known instruction sequences and resolve displacements. See [d2r-memory-offsets.md — Byte Scan Patterns](d2r-memory-offsets.md#byte-scan-patterns) and [patching-guide.md — Method B](patching-guide.md#method-b-byte-pattern-scanning-automated) for details.
 
-PrimeMH also provides 7 additional global offsets (UI state, expansion flag, hover info, roster, panels, keybindings, last game name) that diablo2utils does not currently use but are documented for future reference.
+Ready-to-run scripts for this are in [`patch-scripts/`](../patch-scripts/):
+
+```bash
+python3 patch-scripts/scan-offsets.py          # scan for all offsets
+python3 patch-scripts/verify-offset.py --offset 0x1EAA3D0   # structural check
+python3 patch-scripts/verify-structs.py --offset 0x1EAA3D0   # deep struct walk
+```
 
 ## Source Files
 

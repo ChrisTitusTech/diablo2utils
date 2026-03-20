@@ -34,27 +34,54 @@ Check these sources for updated offsets:
 
 Look for a value labeled `UnitTable`, `UnitHashTable`, or `pUnitTable` relative to D2R.exe's base address.
 
-### Method B: Byte Pattern Scanning (PrimeMH Approach)
+### Method B: Byte Pattern Scanning (Automated)
 
-PrimeMH's `find_offsets` function locates offsets by scanning D2R.exe's code section for unique byte patterns that survive minor patches. This is the most reliable automated method.
+> **Recommended method** — the `patch-scripts/` directory contains ready-to-run Python scripts that automate this process against a live D2R instance.
 
-**How it works**: Each offset is associated with a known instruction sequence. The scanner finds that sequence in memory, reads a RIP-relative displacement from within it, and resolves the absolute address.
+**Important**: D2R's `.text` section is DRM-encrypted on disk. The patterns only exist in decrypted form at runtime, so the scripts read from `/proc/PID/mem`.
+
+#### Quick workflow
+
+```bash
+# 1. Start D2R and enter a game with a character
+
+# 2. Scan all 7 documented patterns (auto-detects PID and module base)
+python3 patch-scripts/scan-offsets.py
+
+# 3. Verify the discovered unit_table offset structurally
+python3 patch-scripts/verify-offset.py --offset 0x<VALUE_FROM_STEP_2>
+
+# 4. Deep-verify struct layouts (player name, position, difficulty)
+python3 patch-scripts/verify-structs.py --offset 0x<VALUE_FROM_STEP_2>
+```
+
+See [patch-scripts/README.md](../patch-scripts/README.md) for full usage details, including verbose mode, explicit PID, range scanning, and expected-value validation.
+
+#### How pattern scanning works
+
+Each offset is associated with a known instruction sequence. The scanner finds that sequence in memory, reads a displacement from it, and resolves the final offset using one of three addressing modes:
+
+| Mode | Resolution | Example |
+|---|---|---|
+| RIP-relative | `match_rva + pattern_offset + 4 + disp32 + adj` | `ui_offset`, `panels`, `roster` |
+| Direct displacement | `disp32 + adj` (register holds module base) | `unit_table`, `hover` |
+| Data pattern | `match_rva + adj` (match IS the data) | `keybindings` |
 
 #### UNIT_TABLE_OFFSET Pattern
 
 ```
 Pattern:  48 03 C7 49 8B 8C C6
-Offset:   7 bytes into the match (the RIP-relative disp starts at byte 7)
+Offset:   7 bytes into the match (displacement starts at byte 7)
+Mode:     direct — the disp32 IS the offset (register holds module base)
 Adj:      0
 
 Steps:
-  1. Scan D2R.exe code for  48 03 C7 49 8B 8C C6
+  1. Scan D2R.exe code (from process memory) for  48 03 C7 49 8B 8C C6
   2. At match_addr + 7, read a 4-byte signed i32 displacement
-  3. resolved = match_addr + 7 + 4 + displacement
-  4. UNIT_TABLE_OFFSET = resolved - module_base
+  3. UNIT_TABLE_OFFSET = displacement  (no further arithmetic needed)
 ```
 
-This corresponds to the instruction that indexes into the UnitHashTable — it uses `add rax, rdi` then `mov rcx, [r14+rax*8+disp]` to look up a hash bucket.
+This corresponds to `add rax, rdi` → `mov rcx, [r14+rax*8+disp32]` where r14 holds the module base.
 
 #### All Known Scan Patterns
 
@@ -62,18 +89,19 @@ See [d2r-memory-offsets.md — Byte Scan Patterns](d2r-memory-offsets.md#byte-sc
 
 #### Implementing a Pattern Scanner
 
+For a full working implementation, see [`patch-scripts/scan-offsets.py`](../patch-scripts/scan-offsets.py). The core logic for each mode:
+
 ```python
-# Pseudocode for RIP-relative pattern scanning
 import struct
 
-def scan_pattern(code_bytes, base_addr, pattern, pattern_offset, adj):
-    """Scan code_bytes for pattern, resolve RIP-relative address."""
-    for match_pos in find_all_matches(code_bytes, pattern):
-        disp_pos = match_pos + pattern_offset
-        disp = struct.unpack_from('<i', code_bytes, disp_pos)[0]  # signed i32
-        resolved = base_addr + disp_pos + 4 + disp  # RIP-relative: next_instr + disp
-        return resolved + adj - base_addr  # return as offset from module base
-    return None
+def resolve_match(match_rva, code_bytes, match_offset, pattern_offset, adj, mode):
+    disp = struct.unpack_from('<i', code_bytes, match_offset + pattern_offset)[0]
+    if mode == 'rip_relative':
+        return match_rva + pattern_offset + 4 + disp + adj
+    elif mode == 'direct':
+        return disp + adj
+    elif mode == 'data':
+        return match_rva + adj
 ```
 
 **Wildcard bytes** (`??` in patterns like `48 8B 05 ?? ?? ?? ??`) match any value — they represent variable instruction operands that change between builds.

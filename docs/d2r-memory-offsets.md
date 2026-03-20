@@ -75,30 +75,45 @@ These additional offsets come from [PrimeMH's `find_offsets` function](https://g
 
 PrimeMH finds these offsets by scanning the D2R.exe module for unique byte signatures, then applying a relative offset adjustment. The `pattern_offset` is the byte index within the matched pattern where a RIP-relative displacement starts, and `adj` is added to the resolved address.
 
-| Name | Byte Pattern | `pattern_offset` | `adj` | Notes |
-|---|---|---|---|---|
-| `unit_table` | `48 03 C7 49 8B 8C C6` | 7 | 0 | Instruction at hash table access |
-| `ui_offset` | `40 84 ed 0f 94 05` | 6 | +10 | `test` + `sete` instruction pair; result `- 0xA` in the returned struct |
-| `expansion` | `48 8B 05 ?? ?? ?? ?? ?? 8B D9 F3 0F 10 50 ??` | 3 | +7 | `mov rax, [rip+disp]` — wildcard bytes (`??`) are ignored during scan |
-| `hover` | `C6 84 C2 ?? ?? ?? ?? ?? 48 8B 74 24 ??` | 3 | -1 | `mov byte ptr [rdx+rax*8+disp]` — displacement is the hover struct offset |
-| `roster` | `02 45 33 D2 4D 8B` | -3 | +1 | Pattern is mid-instruction; negative offset backs up to the RIP-relative disp |
-| `panels` | `48 89 05 ?? ?? ?? ?? 48 85 DB 74 1E` | 3 | +7 | `mov [rip+disp], rax` — stores panel pointer |
-| `keybindings` | `02 00 00 00 ?? ?? 00 00 00 00 03 00 00 00 ?? ?? 01 00 00 00` | 0 | +0x158C | Data pattern match — offset is from start of key binding data |
-| `last_game_name` | *(none — hardcoded)* | — | — | No scan pattern provided; defined directly in PrimeMH's `Offsets` struct |
+| Name | Byte Pattern | `pattern_offset` | `adj` | Mode | Notes |
+|---|---|---|---|---|---|
+| `unit_table` | `48 03 C7 49 8B 8C C6` | 7 | 0 | direct | `add rax,rdi; mov rcx,[r14+rax*8+disp32]` — disp32 IS the offset |
+| `ui_offset` | `40 84 ed 0f 94 05` | 6 | +10 | rip_relative | `test` + `sete [rip+disp32]` |
+| `expansion` | `48 8B 05 ?? ?? ?? ?? ?? 8B D9 F3 0F 10 50 ??` | 3 | +7 | rip_relative | `mov rax, [rip+disp]` — wildcard bytes (`??`) are ignored during scan |
+| `hover` | `C6 84 C2 ?? ?? ?? ?? ?? 48 8B 74 24 ??` | 3 | -1 | direct | `mov byte [rdx+rax*8+disp32]` — displacement is the hover struct offset |
+| `roster` | `02 45 33 D2 4D 8B` | -3 | +1 | rip_relative | Mid-instruction pattern; negative offset backs up to the RIP-relative disp |
+| `panels` | `48 89 05 ?? ?? ?? ?? 48 85 DB 74 1E` | 3 | +7 | rip_relative | `mov [rip+disp32], rax` — stores panel pointer |
+| `keybindings` | `02 00 00 00 ?? ?? 00 00 00 00 03 00 00 00 ?? ?? 01 00 00 00` | 0 | +0x158C | data | Data pattern match — offset is match_rva + adj |
+| `last_game_name` | *(none — hardcoded)* | — | — | — | No scan pattern provided; defined directly in PrimeMH's `Offsets` struct |
+
+### Addressing Modes
+
+Not all patterns use RIP-relative addressing. Each pattern resolves via one of three modes:
+
+| Mode | Formula | When Used |
+|---|---|---|
+| `rip_relative` | `final = match_rva + pattern_offset + 4 + disp32 + adj` | Most patterns — `[rip+disp32]` addressing |
+| `direct` | `final = disp32 + adj` | When a register holds the module base — `[reg+rax*8+disp32]` |
+| `data` | `final = match_rva + adj` | Data patterns where the match location itself is the target |
 
 ### How Pattern Scanning Works
 
 ```
-1. Read D2R.exe's memory-mapped code section
+1. Read D2R.exe's decrypted .text section from /proc/PID/mem
+   (On-disk .text is DRM-encrypted — must read from a running process)
 2. For each pattern:
    a. Search for the byte sequence (treating ?? as wildcard)
-   b. At match_addr + pattern_offset, read a 4-byte signed RIP-relative displacement
-   c. Compute: resolved = match_addr + pattern_offset + 4 + displacement
-   d. Apply adjustment: final_offset = resolved + adj - module_base
-3. The final_offset is relative to D2R.exe's base address
+   b. At match_offset + pattern_offset, read a 4-byte signed i32 displacement
+   c. Resolve using the pattern's addressing mode:
+      - rip_relative: final = match_rva + pattern_offset + 4 + disp + adj
+      - direct:       final = disp + adj
+      - data:         final = match_rva + adj
+3. The result is an offset relative to D2R.exe's base address
 ```
 
 This approach survives minor patches where code is shifted but instruction patterns remain the same. Only major refactors that change the instruction sequences require new patterns.
+
+> **Automated tooling**: See [`patch-scripts/`](../patch-scripts/) for ready-to-run Python scripts that implement this scanning and verification process.
 
 ---
 
