@@ -198,6 +198,12 @@ async function main(): Promise<void> {
   const proc = await Diablo2Process.find();
 
   Log.info({ procId: proc.process.pid }, 'Process:Found');
+
+  // Scan D2R's memory for the items table to get correct txtFileNo → code mapping.
+  // D2R may have different item indices than classic D2 1.13c MPQ data
+  // (e.g., Sunder Charms and other additions shift the indices).
+  await proc.initD2RItems(Log);
+
   const session = new Diablo2GameSessionMemory(proc, playerName ?? undefined);
 
   if (playerName) {

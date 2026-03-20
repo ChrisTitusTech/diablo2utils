@@ -1,7 +1,8 @@
-import { Diablo2Version, UnitType } from '@diablo2/data';
+import { Diablo2Item, Diablo2Mpq, Diablo2Version, UnitType } from '@diablo2/data';
 import { StrutAny, StrutInfer, toHex } from 'binparse';
 import 'source-map-support/register.js';
 import { Diablo2Player } from './d2.player.js';
+import { D2RItemTable, scanD2RItemsTable } from './d2r.items.js';
 import { LogType } from './logger.js';
 import { Process } from './process.js';
 import { ScannerBuffer } from './scanner.js';
@@ -32,6 +33,41 @@ export class Diablo2Process {
 
   /** Cached D2R.exe module base address */
   private _d2rBase: number | null = null;
+
+  /**
+   * Runtime item table read from D2R's process memory.
+   * Maps txtFileNo → Diablo2Item (code + nameId).
+   * This overrides the classic MPQ-based byIndex lookup, because D2R
+   * has different item indices (Sunder Charms, etc.) than classic D2 1.13c.
+   */
+  d2rItems: D2RItemTable | null = null;
+
+  /**
+   * Look up an item by its txtFileNo.
+   * Prefers the runtime D2R items table (if loaded), falls back to classic MPQ data.
+   */
+  getItemByIndex(txtFileNo: number): Diablo2Item | undefined {
+    if (this.d2rItems != null) {
+      return this.d2rItems.byIndex.get(txtFileNo);
+    }
+    return Diablo2Mpq.items.byIndex[txtFileNo];
+  }
+
+  /**
+   * Scan D2R's process memory for the in-memory ItemsTxt table to
+   * build a correct txtFileNo → item code mapping.
+   *
+   * Should be called once after the process is found and MPQ data is loaded.
+   * If the scan fails (e.g., game hasn't finished loading), the classic MPQ
+   * data is used as fallback.
+   */
+  async initD2RItems(logger: LogType): Promise<void> {
+    try {
+      this.d2rItems = await scanD2RItemsTable(this.process, logger);
+    } catch (e) {
+      logger.warn({ error: String(e) }, 'D2R:ItemsScan:Error');
+    }
+  }
 
   constructor(proc: Process) {
     this.process = proc;

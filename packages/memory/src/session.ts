@@ -293,7 +293,7 @@ export class Diablo2GameSessionMemory {
     for (const unit of units.values()) {
       // type and mode are already filtered inside getGroundItems()
 
-      const itemData = Diablo2Mpq.items.byIndex[unit.txtFileNo];
+      const itemData = this.d2.getItemByIndex(unit.txtFileNo);
       const itemKey = `${unit.unitId}-${unit.txtFileNo}`;
 
       if (this.itemIgnore.has(itemKey)) continue;

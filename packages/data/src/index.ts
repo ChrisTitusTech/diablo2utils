@@ -13,6 +13,7 @@ export {
   Diablo2Map,
 } from './level.js';
 export { Diablo2Mpq, Diablo2MpqData } from './mpq/mpq.js';
+export type { Diablo2Item } from './mpq/mpq.item.js';
 export { NpcEnchant, NpcResists, NpcFlag, NpcFlags, getNpcFlags } from './npc.js';
 export { PlayerClass } from './player.class.js';
 export { UnitType, UnitVisibility } from './unit.js';
