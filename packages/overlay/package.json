@@ -1,0 +1,38 @@
+{
+  "name": "@diablo2/overlay",
+  "version": "0.9.0",
+  "private": "true",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blacha/diablo2.git",
+    "directory": "packages/overlay"
+  },
+  "author": {
+    "name": "Blayne Chard",
+    "email": "blayne@chard.com"
+  },
+  "type": "module",
+  "license": "MIT",
+  "main": "./build/index.js",
+  "types": "./build/index.d.ts",
+  "scripts": {
+    "build:ts": "tsc -b",
+    "build:bundle": "esbuild src/main.ts --bundle --outfile=dist/index.js --platform=browser --target=es2020",
+    "build": "yarn build:ts && yarn build:bundle && cp src/index.html dist/ && cp src/style.css dist/",
+    "dev": "esbuild src/main.ts --bundle --outfile=dist/index.js --platform=browser --target=es2020 --servedir=dist --serve=1420",
+    "tauri:dev": "cd src-tauri && cargo tauri dev",
+    "tauri:build": "cd src-tauri && cargo tauri build",
+    "test": "ospec --globs 'build/**/*.test.js'"
+  },
+  "dependencies": {
+    "@diablo2/data": "^0.9.0",
+    "@diablo2/state": "^0.9.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.14.38",
+    "@tauri-apps/cli": "^2.0.0"
+  },
+  "files": [
+    "build/"
+  ]
+}

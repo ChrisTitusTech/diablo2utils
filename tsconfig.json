@@ -11,6 +11,7 @@
         { "path": "./packages/viewer" },
         { "path": "./packages/map" },
         { "path": "./packages/memory" },
+        { "path": "./packages/overlay" },
 
     ]
 }
