@@ -61,9 +61,9 @@ export class Diablo2GameSessionMemory {
    *  stale and trigger a player-lost event.  4 ticks ≈ 1 second. */
   private static readonly NO_POSITION_THRESHOLD = 4;
 
-  constructor(proc: Diablo2Process, playerName: string) {
+  constructor(proc: Diablo2Process, playerName?: string) {
     this.d2 = proc;
-    this.playerName = playerName;
+    this.playerName = playerName ?? '';
     this.state = new Diablo2State(id, Log);
   }
 
@@ -138,7 +138,8 @@ export class Diablo2GameSessionMemory {
   }
 
   async start(logger: LogType): Promise<void> {
-    logger.info({ d2Proc: this.d2.process.pid, player: this.playerName }, 'Session:Start');
+    const displayName = this.playerName || '(auto-detect)';
+    logger.info({ d2Proc: this.d2.process.pid, player: displayName }, 'Session:Start');
 
     let errorCount = 0;
     while (true) {
@@ -192,8 +193,15 @@ export class Diablo2GameSessionMemory {
         continue;
       }
 
-      this.player = await this.d2.scanForPlayer(this.playerName, logger, true);
+      this.player = await this.d2.scanForPlayer(this.playerName || undefined, logger, true);
       if (this.player == null) continue;
+
+      // Auto-detect: populate playerName from the unit we just found
+      if (!this.playerName && this.d2.lastPlayerName) {
+        this.playerName = this.d2.lastPlayerName;
+        logger.info({ player: this.playerName }, 'Player:AutoDetected');
+      }
+
       return this.player;
     }
   }

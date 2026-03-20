@@ -27,6 +27,9 @@ export class Diablo2Process {
 
   lastOffset = { name: 0, player: 0, seed: 0 };
 
+  /** Name of the last player found (used by auto-detect mode) */
+  lastPlayerName = '';
+
   /** Cached D2R.exe module base address */
   private _d2rBase: number | null = null;
 
@@ -175,7 +178,7 @@ export class Diablo2Process {
    * PlayerData.name matches the target player name.
    * Much faster than full memory scan — completes in milliseconds.
    */
-  async scanForPlayerInHashTable(playerName: string, logger: LogType): Promise<Diablo2Player | null> {
+  async scanForPlayerInHashTable(playerName: string | undefined, logger: LogType): Promise<Diablo2Player | null> {
     let base: number;
     try {
       base = await this.getD2RBase(logger);
@@ -208,11 +211,15 @@ export class Diablo2Process {
           if (unit.type === UnitType.Player && unit.pData.isValid) {
             const playerData = await this.readStrutAt(unit.pData.offset, D2rUnitDataPlayerStrut);
             const name = playerData.name.split('\0')[0];
-            if (name === playerName && Pointer.isPointersValid(unit) !== 0) {
+            // When playerName is provided, match by name; otherwise accept
+            // the first valid player unit (auto-detect mode).
+            const nameMatch = playerName == null || name === playerName;
+            if (nameMatch && name.length > 0 && Pointer.isPointersValid(unit) !== 0) {
               this.lastOffset.player = unitPtr;
               this.lastOffset.name = unit.pData.offset;
+              this.lastPlayerName = name;
               logger.info(
-                { unit: toHex(unitPtr), name: toHex(unit.pData.offset) },
+                { unit: toHex(unitPtr), name: toHex(unit.pData.offset), player: name },
                 'Player:HashTable:Found',
               );
               return new Diablo2Player(this, unitPtr);
@@ -228,7 +235,7 @@ export class Diablo2Process {
     return null;
   }
 
-  async scanForPlayer(playerName: string, logger: LogType, skipSlowScan = false): Promise<Diablo2Player | null> {
+  async scanForPlayer(playerName: string | undefined, logger: LogType, skipSlowScan = false): Promise<Diablo2Player | null> {
     // Strategy 1: Quick check of the last known player offset
     if (this.lastOffset.name > 0) {
       logger.info({ lastGoodAddress: this.lastOffset }, 'Offsets:Previous');
@@ -255,6 +262,11 @@ export class Diablo2Process {
     }
 
     // Strategy 3: Slow full memory scan (fallback — initial startup only)
+    // Requires a player name to search for in memory text.
+    if (playerName == null) {
+      logger.info({}, 'Player:AutoDetect:WaitingForHashTable');
+      return null;
+    }
     for await (const mem of this.process.scanDistance(this.lastOffset.name)) {
       for (const nameOffset of ScannerBuffer.text(mem.buffer, playerName, 0x40)) {
         const playerNameOffset = nameOffset + mem.map.start;

@@ -9,7 +9,9 @@ set -e
 # pre-warming the cache so the browser map viewer is always up to date.
 #
 # Usage:
-#   ./run-with-memory.sh <playerName>
+#   ./run-with-memory.sh [playerName]
+#
+# If playerName is omitted, the active player is auto-detected.
 #
 # Environment variables (all optional):
 #   D2_PATH          – path to classic D2 DLLs + MPQs (default: assets/d2)
@@ -21,16 +23,12 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-if [ $# -lt 1 ]; then
-    echo "Usage: $0 <playerName>"
-    echo ""
-    echo "Starts the map server and the memory reader together."
-    echo "The memory reader watches D2R for seed changes and pre-fetches maps."
-    exit 1
+if [ $# -ge 1 ]; then
+    PLAYER_NAME="$1"
+    shift
+else
+    PLAYER_NAME=""
 fi
-
-PLAYER_NAME="$1"
-shift
 
 # Load environment persisted by install.sh
 # shellcheck source=.env
@@ -159,13 +157,21 @@ if ! curl -sf "http://localhost:$PORT/health" >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "=== Starting memory reader for player '$PLAYER_NAME' ==="
+if [ -n "$PLAYER_NAME" ]; then
+    echo "=== Starting memory reader for player '$PLAYER_NAME' ==="
+else
+    echo "=== Starting memory reader (auto-detect player) ==="
+fi
 echo "  Map server:  http://localhost:$PORT"
 echo "  Map viewer:  http://localhost:$PORT  (open in browser)"
 echo ""
 
 # Run the memory reader while keeping this script alive so cleanup still runs.
 cd "$REPO_ROOT"
-node packages/memory/build/cli.js "$PLAYER_NAME" "$@" &
+if [ -n "$PLAYER_NAME" ]; then
+    node packages/memory/build/cli.js "$PLAYER_NAME" "$@" &
+else
+    node packages/memory/build/cli.js "$@" &
+fi
 MEMORY_READER_PID=$!
 wait "$MEMORY_READER_PID"

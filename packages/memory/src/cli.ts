@@ -14,11 +14,13 @@ de.config();
 
 function usage(err?: string): void {
   if (err) console.log(`Error ${err} \n`);
-  console.log('Usage: reader :playerName\n');
+  console.log('Usage: reader [:playerName]\n');
+  console.log('  If playerName is omitted, the active player is auto-detected.\n');
 }
 
 function getPlayerName(): string | null {
-  for (let i = process.argv.length - 1; i >= 0; i--) {
+  // argv[0] = node, argv[1] = script path; player name starts at argv[2]
+  for (let i = process.argv.length - 1; i >= 2; i--) {
     const arg = process.argv[i];
     if (arg.startsWith('-')) continue;
     return arg;
@@ -184,10 +186,7 @@ async function fetchMaps(
 }
 
 async function main(): Promise<void> {
-  if (process.argv.length < 3) return usage();
-
   const playerName = getPlayerName();
-  if (playerName == null) return usage('Missing player name');
 
   const diablo2Path = resolveDiablo2Path();
   if (diablo2Path) {
@@ -199,7 +198,13 @@ async function main(): Promise<void> {
   const proc = await Diablo2Process.find();
 
   Log.info({ procId: proc.process.pid }, 'Process:Found');
-  const session = new Diablo2GameSessionMemory(proc, playerName);
+  const session = new Diablo2GameSessionMemory(proc, playerName ?? undefined);
+
+  if (playerName) {
+    Log.info({ player: playerName }, 'Player:Manual');
+  } else {
+    Log.info({}, 'Player:AutoDetect (no name specified)');
+  }
 
   // When the map seed changes, automatically fetch maps from the @diablo2/map
   // server to pre-warm its cache.  The server must be running separately
