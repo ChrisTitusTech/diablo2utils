@@ -1,8 +1,18 @@
 # Pointer Chains
 
-This document describes every pointer chain traversed to read game state from D2R's process memory.
+This document maps every pointer chain traversed to read game state from D2R's process memory. A "pointer chain" is a sequence of memory reads where each read yields an address that tells us where to read next, like following a trail of breadcrumbs through memory.
 
-All chains start from the D2R.exe module base address + `UNIT_TABLE_OFFSET` (`0x1EAA3D0`).
+All chains start from the D2R.exe module base address + `UNIT_TABLE_OFFSET` (`0x1EAA3D0`). For struct field offsets and sizes, see [d2r-memory-offsets.md](d2r-memory-offsets.md). For how `UNIT_TABLE_OFFSET` is discovered, see the [Patching Guide](patching-guide.md).
+
+### How to Read the Chain Diagrams
+
+```
+UnitAny                           ← start here (we have this address)
+  └─ pPath @ 0x38 → Path         ← read 8 bytes at UnitAny+0x38, get a pointer to Path struct
+       └─ x @ 0x02 (u16)         ← read 2 bytes at Path+0x02, this is the X coordinate
+```
+
+Each `→` means "dereference the pointer" — read the address stored there, then jump to that address and interpret the data at the new location as the next struct.
 
 ---
 
@@ -23,7 +33,7 @@ All chains start from the D2R.exe module base address + `UNIT_TABLE_OFFSET` (`0x
 
 **Source**: `packages/memory/src/d2.ts` → `scanForPlayer()`, `scanForPlayerInHashTable()`
 
-Three strategies are tried in order:
+Before we can read any game data, we need to find the player's `UnitAny` struct in memory. This is the root of all other pointer chains. Three strategies are tried in order, from fastest to slowest:
 
 ### Strategy 1: Cached Offset (Fastest)
 

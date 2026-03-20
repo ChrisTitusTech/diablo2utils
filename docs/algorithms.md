@@ -1,6 +1,8 @@
 # Algorithms
 
-This document describes the key algorithms used to extract game data from D2R's process memory.
+This document explains the key algorithms used to extract and transform game data from D2R's process memory. Where the [Pointer Chains](pointer-chains.md) document shows _where_ to read data, this document explains _how_ that data is interpreted and processed.
+
+Each algorithm is presented with its mathematical foundation, step-by-step logic, and the corresponding TypeScript implementation.
 
 ---
 
@@ -18,7 +20,15 @@ This document describes the key algorithms used to extract game data from D2R's 
 
 **Source**: `packages/memory/src/session.ts` → `deriveMapSeed()`, `resolveMapSeed()`
 
-D2R stores the map seed indirectly via a Linear Congruential Generator (LCG). The `ActMisc` struct contains two seed-related values that can be used to recover the actual game map seed.
+D2R doesn't store the game's map seed directly in an easily accessible field. Instead, it stores two values derived from the seed using a Linear Congruential Generator (LCG). We reverse the LCG to recover the original seed.
+
+### Background: What Is an LCG?
+
+A Linear Congruential Generator is a simple pseudorandom number formula:
+
+$$\text{next} = (a \times \text{current} + c) \mod m$$
+
+Where $a$ is the multiplier, $c$ is the increment, and $m$ is the modulus. Crucially, this is reversible if you know $a$'s modular multiplicative inverse — a value $a^{-1}$ such that $a \times a^{-1} \equiv 1 \pmod{m}$.
 
 ### The LCG Relationship
 
@@ -161,6 +171,10 @@ The stride varies by D2R version (typically 0x298–0x2E0, or 664–736 bytes).
 
 **Source**: `packages/memory/src/process.ts` → `Process.findPidByName()`
 
+Before we can read any memory, we need to find D2R's process ID (PID). Under Wine/Proton, a single game launch creates multiple processes (the Wine server, launcher wrappers, gamescope compositor, etc.). The scoring system below picks the right one.
+
+For background on process memory layout, see [patching-guide.md — Process Memory on Linux](patching-guide.md#process-memory-on-linux).
+
 ### PID Discovery
 
 ```
@@ -209,7 +223,11 @@ await fh.read(buf, 0, count, offset);
 
 **Source**: `packages/memory/src/d2.ts` → `getD2RBase()`
 
-Three strategies, tried in order:
+Once we have the PID, we need the module base address — the virtual address where D2R.exe is loaded in memory. All offsets (like `UNIT_TABLE_OFFSET`) are relative to this base. Wine typically maps PE executables at `0x140000000` (the default 64-bit PE base address), but this isn't guaranteed.
+
+For background on PE format and module bases, see [patching-guide.md — PE Format](patching-guide.md#pe-format-portable-executable).
+
+Three strategies are tried, from most specific to most generic:
 
 ### Strategy 1: Named Module Search
 
@@ -255,7 +273,7 @@ This allows re-detection if the game process was restarted.
 
 **Source**: `packages/memory/src/session.ts` → `waitForPlayer()`
 
-When the player is lost (game exit, reconnect, etc.), the system enters a re-acquisition loop:
+When the player quits a game and creates/joins a new one, the old `UnitAny` pointer becomes invalid. The re-acquisition loop detects this and polls for the new player, using an exponential backoff to avoid hammering the process with reads.
 
 ```
 1. Validate current player pointer (if cached)

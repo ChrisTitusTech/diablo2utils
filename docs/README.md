@@ -1,17 +1,18 @@
-# D2R Memory Offset Documentation
+# D2R Memory Reading — Documentation
 
-This directory documents the memory structures and offsets used to read Diablo II Resurrected (D2R) process memory on Linux via `/proc/PID/mem`.
+This directory documents how diablo2utils reads Diablo II Resurrected (D2R) process memory on Linux via `/proc/PID/mem` to extract game state (player position, map seed, items, etc.) without modifying the game.
 
-When D2R patches change offsets, these docs make it possible to locate and update them.
+## New User Start Here
 
-## Contents
+If you're new to this project, read the documents in this order:
 
-| Document | Description |
-|---|---|
-| [d2r-memory-offsets.md](d2r-memory-offsets.md) | Complete struct layouts, hex offsets, and field types |
-| [pointer-chains.md](pointer-chains.md) | How pointer chains are traversed to reach each piece of data |
-| [algorithms.md](algorithms.md) | Map seed derivation, ItemsTxt scanning, process discovery |
-| [patching-guide.md](patching-guide.md) | Step-by-step guide for updating offsets after a D2R patch |
+1. **[Patching Guide](patching-guide.md)** — Start here. Explains the core concepts (process memory, PE format, addressing modes, DRM) and walks through every method for finding memory offsets. Includes step-by-step instructions for the automated scanning scripts.
+
+2. **[D2R Memory Offsets](d2r-memory-offsets.md)** — Reference for all struct layouts, field offsets, sizes, and types. Look here when you need to know "what's at offset 0x38 in a UnitAny?"
+
+3. **[Pointer Chains](pointer-chains.md)** — How the code traverses from the UnitHashTable to each piece of game data (player position, map seed, difficulty, items). Read this to understand the chain of memory reads.
+
+4. **[Algorithms](algorithms.md)** — The math and logic behind data processing: map seed derivation (LCG inverse), ItemsTxt scanning, process discovery, module base detection.
 
 ## Quick Reference — What Changes Between Patches
 
@@ -21,17 +22,22 @@ Almost every D2R patch can shift struct field offsets. The items most likely to 
 2. **Struct field offsets** — any field inside `UnitAny`, `Act`, `ActMisc`, `Path`, `Room`, `RoomEx`, `Level`, `ItemData`, `PlayerData`, or `StatList` can shift.
 3. **ItemsTxt record stride** — the size of each item record in D2R's internal table. New item fields or re-ordering shifts this.
 
-### PrimeMH Byte Pattern Scanning
+## Automated Offset Recovery
 
-The fastest way to find the new `UNIT_TABLE_OFFSET` after a patch is byte pattern scanning — search D2R.exe's code section for known instruction sequences and resolve displacements. See [d2r-memory-offsets.md — Byte Scan Patterns](d2r-memory-offsets.md#byte-scan-patterns) and [patching-guide.md — Method B](patching-guide.md#method-b-byte-pattern-scanning-automated) for details.
-
-Ready-to-run scripts for this are in [`patch-scripts/`](../patch-scripts/):
+Ready-to-run scripts for finding and verifying offsets after a patch:
 
 ```bash
-python3 patch-scripts/scan-offsets.py          # scan for all offsets
-python3 patch-scripts/verify-offset.py --offset 0x1EAA3D0   # structural check
-python3 patch-scripts/verify-structs.py --offset 0x1EAA3D0   # deep struct walk
+# Scan for all known offsets (requires D2R running in a game)
+python3 patch-scripts/scan-offsets.py
+
+# Verify a candidate offset structurally (hash table shape check)
+python3 patch-scripts/verify-offset.py --offset 0x1EAA3D0
+
+# Deep-verify struct layouts (walks pointer chains to read player data)
+python3 patch-scripts/verify-structs.py --offset 0x1EAA3D0
 ```
+
+See [`patch-scripts/README.md`](../patch-scripts/README.md) for full usage and the [Patching Guide — Method B](patching-guide.md#method-b-byte-pattern-scanning-automated) for how it all works.
 
 ## Source Files
 

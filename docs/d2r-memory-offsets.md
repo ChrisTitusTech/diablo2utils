@@ -1,10 +1,19 @@
 # D2R Memory Offsets & Struct Layouts
 
+This document is the reference for every memory offset and struct layout used to read game state from D2R's process memory. If you're new to this project, start with the [Patching Guide](patching-guide.md) for context on how these offsets are discovered and used.
+
 > **D2R Version**: 3.1.91636 (latest patch as of this writing)
 >
 > **Reference**: Offsets are cross-checked with [PrimeMH](https://github.com/) and d2r-mapview.
 >
 > **Source**: `packages/memory/src/struts/`
+
+## How This Document Is Organized
+
+1. **Global Constants** — the handful of key values (`UNIT_TABLE_OFFSET`, bucket counts, etc.)
+2. **PrimeMH Community Offsets** — all known offsets from community tools, their byte patterns, and addressing modes
+3. **Struct Layouts** — every struct we read from memory, field by field (UnitAny, PlayerData, ItemData, Act, Path, etc.)
+4. **Validation Rules** — how we know a pointer or value is valid
 
 ---
 
@@ -98,18 +107,27 @@ Not all patterns use RIP-relative addressing. Each pattern resolves via one of t
 
 ### How Pattern Scanning Works
 
+The idea behind byte pattern scanning is straightforward: when D2R's compiler generates code that accesses a global variable (like the UnitHashTable), it produces a specific sequence of machine instructions. The instruction opcodes stay the same across patches — only the displacement (the address embedded in the instruction) changes. We search for the stable opcodes and read the new displacement from the match.
+
+**Why can't we just scan the D2R.exe file on disk?** D2R uses DRM that encrypts the `.text` section (the compiled code) on disk. The bytes are scrambled and our patterns won't match. At runtime, the DRM decrypts the code into memory, so we must read from the running process via `/proc/PID/mem`.
+
+#### Step-by-Step Process
+
 ```
-1. Read D2R.exe's decrypted .text section from /proc/PID/mem
-   (On-disk .text is DRM-encrypted — must read from a running process)
-2. For each pattern:
+1. Find the D2R process and its module base address
+2. Parse PE headers to locate the .text section (RVA and size)
+3. Read the full .text section from /proc/PID/mem (decrypted at runtime)
+4. For each pattern:
    a. Search for the byte sequence (treating ?? as wildcard)
    b. At match_offset + pattern_offset, read a 4-byte signed i32 displacement
    c. Resolve using the pattern's addressing mode:
       - rip_relative: final = match_rva + pattern_offset + 4 + disp + adj
       - direct:       final = disp + adj
       - data:         final = match_rva + adj
-3. The result is an offset relative to D2R.exe's base address
+5. The result is an RVA (offset relative to D2R.exe's base address)
 ```
+
+For a detailed explanation of each addressing mode with worked examples, see [patching-guide.md — How Pattern Scanning Works (In Depth)](patching-guide.md#how-pattern-scanning-works-in-depth).
 
 This approach survives minor patches where code is shifted but instruction patterns remain the same. Only major refactors that change the instruction sequences require new patterns.
 
