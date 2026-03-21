@@ -15,3 +15,4 @@ packages/overlay/src-tauri/target/
 # Diablo II MPQ game-data files — too large for git, symlinked by install.sh
 assets/d2/*.mpq
 assets/d2/*.MPQ
+assets/d2/Save/
