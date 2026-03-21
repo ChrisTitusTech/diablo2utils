@@ -1,8 +1,96 @@
 import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
+import { readFileSync, writeFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const MAP_URL = process.env.MAP_URL || 'http://localhost:8899';
 
-// Set WM_CLASS so DWM floats this window (matches old Tauri class)
+// Persist only map zoom + center to a JSON file
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const STATE_FILE = join(__dirname, '..', 'overlay-state.json');
+
+function loadState() {
+  try {
+    return JSON.parse(readFileSync(STATE_FILE, 'utf-8'));
+  } catch { return {}; }
+}
+
+let saveTimer;
+function saveState(patch) {
+  const state = { ...loadState(), ...patch };
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { writeFileSync(STATE_FILE, JSON.stringify(state)); } catch {}
+  }, 300);
+}
+
+/** Find the D2R.exe window geometry via xdotool. Returns {x, y, width, height} or null. */
+/**
+ * Find the D2R window geometry via xdotool.
+ * Handles: gamescope, plain Wine/Proton, or direct window.
+ * Returns {x, y, width, height} or null.
+ */
+function findD2RWindow() {
+  try {
+    // Strategy 1: exact window name (works for gamescope + wine)
+    let wid = execSync(
+      'xdotool search --name "Diablo II: Resurrected" 2>/dev/null | head -1',
+      { encoding: 'utf-8' },
+    ).trim();
+
+    // Strategy 2: gamescope class (gamescope renames its window to the game title)
+    if (!wid) {
+      const gids = execSync(
+        'xdotool search --class gamescope 2>/dev/null',
+        { encoding: 'utf-8' },
+      ).trim().split('\n').filter(Boolean);
+      for (const gid of gids) {
+        const name = execSync(`xdotool getwindowname ${gid} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+        if (/diablo/i.test(name)) { wid = gid; break; }
+      }
+    }
+
+    // Strategy 3: wine window class
+    if (!wid) {
+      const wineIds = execSync(
+        'xdotool search --class wine 2>/dev/null',
+        { encoding: 'utf-8' },
+      ).trim().split('\n').filter(Boolean);
+      for (const gid of wineIds) {
+        const name = execSync(`xdotool getwindowname ${gid} 2>/dev/null`, { encoding: 'utf-8' }).trim();
+        if (/diablo/i.test(name)) { wid = gid; break; }
+      }
+    }
+
+    // Strategy 4: find gamescope process PID, search by PID
+    if (!wid) {
+      const pid = execSync('pgrep -f "^gamescope " 2>/dev/null | head -1', { encoding: 'utf-8' }).trim();
+      if (pid) {
+        wid = execSync(`xdotool search --pid ${pid} 2>/dev/null | head -1`, { encoding: 'utf-8' }).trim();
+      }
+    }
+
+    if (!wid) return null;
+
+    const geo = execSync(`xdotool getwindowgeometry --shell ${wid} 2>/dev/null`, { encoding: 'utf-8' });
+    const x = geo.match(/^X=(\d+)/m);
+    const y = geo.match(/^Y=(\d+)/m);
+    const w = geo.match(/^WIDTH=(\d+)/m);
+    const h = geo.match(/^HEIGHT=(\d+)/m);
+    if (x && y && w && h) {
+      return {
+        x: parseInt(x[1], 10),
+        y: parseInt(y[1], 10),
+        width: parseInt(w[1], 10),
+        height: parseInt(h[1], 10),
+      };
+    }
+  } catch {}
+  return null;
+}
+
+// Set WM_CLASS so DWM floats this window
 app.setName('Diablo2-overlay');
 app.commandLine.appendSwitch('class', 'Diablo2-overlay');
 
@@ -12,11 +100,20 @@ app.commandLine.appendSwitch('disable-gpu-compositing');
 let win;
 
 app.whenReady().then(() => {
+  const saved = loadState();
+
+  // Match the D2R window exactly — overlay covers the full game window
+  const d2r = findD2RWindow();
+  const startX = d2r ? d2r.x : 0;
+  const startY = d2r ? d2r.y : 0;
+  const startW = d2r ? d2r.width : 2560;
+  const startH = d2r ? d2r.height : 1440;
+
   win = new BrowserWindow({
-    width: 800,
-    height: 600,
-    x: 50,
-    y: 50,
+    width: startW,
+    height: startH,
+    x: startX,
+    y: startY,
     transparent: true,
     frame: false,
     alwaysOnTop: true,
@@ -25,6 +122,7 @@ app.whenReady().then(() => {
     hasShadow: false,
     thickFrame: false,
     type: 'toolbar',
+    resizable: false,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: new URL('./preload.mjs', import.meta.url).pathname,
@@ -37,10 +135,39 @@ app.whenReady().then(() => {
   // Start in click-through mode
   win.setIgnoreMouseEvents(true, { forward: true });
 
+  // DWM ignores BrowserWindow x/y and manages window placement itself.
+  // Set override_redirect so DWM completely ignores this window, then
+  // position it with xdotool.
+  function forcePosition() {
+    try {
+      execSync(
+        'xdotool search --classname diablo2-overlay' +
+        ' set_window --overrideredirect 1 %@' +
+        ' windowunmap %@',
+        { stdio: 'ignore', timeout: 2000 },
+      );
+    } catch { return; }
+    setTimeout(() => {
+      try {
+        execSync(
+          'xdotool search --classname diablo2-overlay' +
+          ' windowmap %@' +
+          ` windowmove %@ ${startX} ${startY}` +
+          ` windowsize %@ ${startW} ${startH}`,
+          { stdio: 'ignore', timeout: 2000 },
+        );
+      } catch {}
+    }, 200);
+  }
+
   win.loadURL(MAP_URL);
 
   // Inject overlay CSS/JS after the page finishes loading
   win.webContents.on('did-finish-load', () => {
+    // Force position once the page is loaded (window is fully mapped by now)
+    forcePosition();
+
+    // Map viewport: 30% of window width, square aspect, top-left
     win.webContents.insertCSS(`
       html, body {
         background: transparent !important;
@@ -54,10 +181,16 @@ app.whenReady().then(() => {
         margin: 0 !important; padding: 0 !important;
         width: 100% !important; height: 100% !important;
         display: block !important;
+        position: absolute !important;
+        top: 0 !important; left: 0 !important;
       }
       #main-map {
-        height: 100vh !important; min-height: unset !important;
-        width: 100vw !important;
+        position: absolute !important;
+        top: 0 !important;
+        left: 0 !important;
+        width: 30vw !important;
+        height: 30vw !important;
+        min-height: unset !important;
       }
       .maplibregl-map { background: transparent !important; }
       .maplibregl-canvas { background: transparent !important; }
@@ -68,8 +201,20 @@ app.whenReady().then(() => {
 
     win.webContents.executeJavaScript(`
       (function() {
-        // Resize map once available
-        function initMap(map) { map.resize(); }
+        function initMap(map) {
+          map.resize();
+          var savedZoom = window.__electron_ipc__.getSavedZoom();
+          var savedCenter = window.__electron_ipc__.getSavedCenter();
+          if (savedZoom != null) map.setZoom(savedZoom);
+          if (savedCenter) map.setCenter(savedCenter);
+          map.on('zoomend', function() {
+            window.__electron_ipc__.saveZoom(map.getZoom());
+          });
+          map.on('moveend', function() {
+            var c = map.getCenter();
+            window.__electron_ipc__.saveCenter([c.lng, c.lat]);
+          });
+        }
         if (window.map && typeof window.map.resize === 'function') {
           initMap(window.map);
         } else {
@@ -81,80 +226,27 @@ app.whenReady().then(() => {
           }, 50);
           setTimeout(function() { clearInterval(t); }, 10000);
         }
-
-        // Create move handle (hidden by default, shown on Alt+M toggle)
-        var handle = document.createElement('div');
-        handle.id = 'overlay-move-handle';
-        handle.innerHTML = '&#9995;';
-        handle.style.cssText = [
-          'display: none',
-          'position: fixed',
-          'top: 4px',
-          'left: 4px',
-          'width: 32px',
-          'height: 32px',
-          'line-height: 32px',
-          'text-align: center',
-          'font-size: 20px',
-          'background: rgba(0,0,0,0.6)',
-          'border-radius: 6px',
-          'cursor: move',
-          'z-index: 999999',
-          'user-select: none',
-          'opacity: 0.9',
-          'color: #fff',
-          'pointer-events: auto',
-        ].join(';');
-        document.body.appendChild(handle);
-
-        var dragging = false;
-        var dragStartX = 0, dragStartY = 0;
-
-        // Listen for interactive mode toggle from main process (Alt+M)
-        window.__electron_ipc__.onToggleInteractive(function(interactive) {
-          if (interactive) {
-            handle.style.display = 'block';
-          } else {
-            dragging = false;
-            handle.style.display = 'none';
-            document.body.style.cursor = 'default';
-          }
-        });
-
-        // Drag on handle moves the window
-        handle.addEventListener('mousedown', function(e) {
-          if (e.button === 0) {
-            dragging = true;
-            dragStartX = e.screenX;
-            dragStartY = e.screenY;
-            e.preventDefault();
-            e.stopPropagation();
-          }
-        });
-        window.addEventListener('mousemove', function(e) {
-          if (dragging) {
-            var dx = e.screenX - dragStartX;
-            var dy = e.screenY - dragStartY;
-            dragStartX = e.screenX;
-            dragStartY = e.screenY;
-            window.__electron_ipc__.moveWindow(dx, dy);
-          }
-        });
-        window.addEventListener('mouseup', function(e) {
-          if (e.button === 0) dragging = false;
-        });
       })();
-    `);
+    `).catch(() => {});
   });
 
-  // Handle window drag-move from renderer
-  ipcMain.on('move-window', (_event, dx, dy) => {
-    if (!win) return;
-    const [x, y] = win.getPosition();
-    win.setPosition(x + dx, y + dy);
+  // Provide saved zoom + center to renderer on startup
+  ipcMain.on('get-saved-zoom', (event) => {
+    event.returnValue = saved.zoom ?? null;
+  });
+  ipcMain.on('get-saved-center', (event) => {
+    event.returnValue = saved.center ?? null;
   });
 
-  // Global shortcut Alt+M toggles interactive mode
+  // Handle zoom/center save from renderer
+  ipcMain.on('save-zoom', (_event, zoom) => {
+    saveState({ zoom });
+  });
+  ipcMain.on('save-center', (_event, center) => {
+    saveState({ center });
+  });
+
+  // Global shortcut Alt+M toggles interactive mode (interact with map)
   let interactive = false;
   globalShortcut.register('Alt+M', () => {
     if (!win) return;
@@ -164,7 +256,6 @@ app.whenReady().then(() => {
     } else {
       win.setIgnoreMouseEvents(true, { forward: true });
     }
-    win.webContents.send('toggle-interactive', interactive);
   });
 });
 

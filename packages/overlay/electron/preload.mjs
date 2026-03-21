@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
+const savedZoom = ipcRenderer.sendSync('get-saved-zoom');
+const savedCenter = ipcRenderer.sendSync('get-saved-center');
+
 contextBridge.exposeInMainWorld('__electron_ipc__', {
-  moveWindow: (dx, dy) => ipcRenderer.send('move-window', dx, dy),
-  onToggleInteractive: (cb) => ipcRenderer.on('toggle-interactive', (_event, interactive) => cb(interactive)),
+  saveZoom: (zoom) => ipcRenderer.send('save-zoom', zoom),
+  getSavedZoom: () => savedZoom,
+  saveCenter: (center) => ipcRenderer.send('save-center', center),
+  getSavedCenter: () => savedCenter,
 });
