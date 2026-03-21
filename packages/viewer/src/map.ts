@@ -543,9 +543,7 @@ export class Diablo2MapViewer {
     if (state.player.x > 0) {
       const { lng, lat } = LevelBounds.sourceToLatLng(state.player.x, state.player.y);
       if (this.centerOnPlayer) {
-        const zoom = (!this.initialZoomApplied && this.stateZoom != null) ? this.stateZoom : this.map.getZoom();
-        this.initialZoomApplied = true;
-        this.map.jumpTo({ center: [lng, lat], zoom });
+        this.map.jumpTo({ center: [lng, lat] });
       }
       const playerJson: GeoJSON.Feature = {
         type: 'Feature',
