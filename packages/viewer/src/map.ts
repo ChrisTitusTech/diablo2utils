@@ -122,8 +122,9 @@ export class Diablo2MapViewer {
 
     this.map = new maplibregl.Map({
       container: el,
-      zoom: 0,
-      minZoom: 0,
+      zoom: 7,
+      minZoom: 3,
+      maxZoom: 15,
       center: [180, 90],
       style: {
         version: 8,
