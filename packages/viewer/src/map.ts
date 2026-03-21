@@ -46,7 +46,9 @@ export class Diablo2MapViewer {
   playerStatus = 'Waiting for player';
 
   /** Zoom level to switch to when the player is centered, nullish to turn off */
-  stateZoom = 7;
+  stateZoom: number | null = 7;
+  /** Has the initial zoom been applied */
+  initialZoomApplied = false;
   /** Should the map follow the player */
   centerOnPlayer = true;
   debugMaxEvents = 60;
@@ -541,7 +543,9 @@ export class Diablo2MapViewer {
     if (state.player.x > 0) {
       const { lng, lat } = LevelBounds.sourceToLatLng(state.player.x, state.player.y);
       if (this.centerOnPlayer) {
-        this.map.jumpTo({ center: [lng, lat], zoom: this.stateZoom ?? this.map.getZoom() });
+        const zoom = (!this.initialZoomApplied && this.stateZoom != null) ? this.stateZoom : this.map.getZoom();
+        this.initialZoomApplied = true;
+        this.map.jumpTo({ center: [lng, lat], zoom });
       }
       const playerJson: GeoJSON.Feature = {
         type: 'Feature',

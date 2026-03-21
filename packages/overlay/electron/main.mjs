@@ -257,6 +257,25 @@ app.whenReady().then(() => {
       win.setIgnoreMouseEvents(true, { forward: true });
     }
   });
+
+  // Global zoom shortcuts: +/- on keyboard and numpad
+  function zoomMap(delta) {
+    if (!win) return;
+    win.webContents.executeJavaScript(`
+      (function() {
+        if (window.map && typeof window.map.getZoom === 'function') {
+          window.map.zoomTo(window.map.getZoom() + (${delta}));
+        }
+      })();
+    `).catch(() => {});
+  }
+
+  for (const key of ['=', 'numadd']) {
+    globalShortcut.register(key, () => zoomMap(1));
+  }
+  for (const key of ['-', 'numsub']) {
+    globalShortcut.register(key, () => zoomMap(-1));
+  }
 });
 
 app.on('will-quit', () => {
