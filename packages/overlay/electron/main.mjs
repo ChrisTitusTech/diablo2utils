@@ -1,6 +1,10 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, globalShortcut } from 'electron';
 
 const MAP_URL = process.env.MAP_URL || 'http://localhost:8899';
+
+// Set WM_CLASS so DWM floats this window (matches old Tauri class)
+app.setName('Diablo2-overlay');
+app.commandLine.appendSwitch('class', 'Diablo2-overlay');
 
 app.commandLine.appendSwitch('enable-transparent-visuals');
 app.commandLine.appendSwitch('disable-gpu-compositing');
@@ -19,6 +23,8 @@ app.whenReady().then(() => {
     skipTaskbar: true,
     focusable: true,
     hasShadow: false,
+    thickFrame: false,
+    type: 'toolbar',
     backgroundColor: '#00000000',
     webPreferences: {
       preload: new URL('./preload.mjs', import.meta.url).pathname,
@@ -76,42 +82,94 @@ app.whenReady().then(() => {
           setTimeout(function() { clearInterval(t); }, 10000);
         }
 
-        // Alt-key click-through toggle
-        var interactive = false;
-        window.addEventListener('keydown', function(e) {
-          if (e.key === 'Alt' && !interactive) {
-            interactive = true;
-            window.__electron_ipc__.setClickthrough(false);
-            document.body.style.cursor = 'move';
-          }
-        });
-        window.addEventListener('keyup', function(e) {
-          if (e.key === 'Alt' && interactive) {
-            interactive = false;
-            window.__electron_ipc__.setClickthrough(true);
-            document.body.style.cursor = 'default';
-          }
-        });
-        window.addEventListener('blur', function() {
+        // Create move handle (hidden by default, shown on Alt+M toggle)
+        var handle = document.createElement('div');
+        handle.id = 'overlay-move-handle';
+        handle.innerHTML = '&#9995;';
+        handle.style.cssText = [
+          'display: none',
+          'position: fixed',
+          'top: 4px',
+          'left: 4px',
+          'width: 32px',
+          'height: 32px',
+          'line-height: 32px',
+          'text-align: center',
+          'font-size: 20px',
+          'background: rgba(0,0,0,0.6)',
+          'border-radius: 6px',
+          'cursor: move',
+          'z-index: 999999',
+          'user-select: none',
+          'opacity: 0.9',
+          'color: #fff',
+          'pointer-events: auto',
+        ].join(';');
+        document.body.appendChild(handle);
+
+        var dragging = false;
+        var dragStartX = 0, dragStartY = 0;
+
+        // Listen for interactive mode toggle from main process (Alt+M)
+        window.__electron_ipc__.onToggleInteractive(function(interactive) {
           if (interactive) {
-            interactive = false;
-            window.__electron_ipc__.setClickthrough(true);
+            handle.style.display = 'block';
+          } else {
+            dragging = false;
+            handle.style.display = 'none';
             document.body.style.cursor = 'default';
           }
+        });
+
+        // Drag on handle moves the window
+        handle.addEventListener('mousedown', function(e) {
+          if (e.button === 0) {
+            dragging = true;
+            dragStartX = e.screenX;
+            dragStartY = e.screenY;
+            e.preventDefault();
+            e.stopPropagation();
+          }
+        });
+        window.addEventListener('mousemove', function(e) {
+          if (dragging) {
+            var dx = e.screenX - dragStartX;
+            var dy = e.screenY - dragStartY;
+            dragStartX = e.screenX;
+            dragStartY = e.screenY;
+            window.__electron_ipc__.moveWindow(dx, dy);
+          }
+        });
+        window.addEventListener('mouseup', function(e) {
+          if (e.button === 0) dragging = false;
         });
       })();
     `);
   });
 
-  // Handle click-through toggle from renderer
-  ipcMain.on('set-clickthrough', (_event, ignore) => {
+  // Handle window drag-move from renderer
+  ipcMain.on('move-window', (_event, dx, dy) => {
     if (!win) return;
-    if (ignore) {
-      win.setIgnoreMouseEvents(true, { forward: true });
-    } else {
-      win.setIgnoreMouseEvents(false);
-    }
+    const [x, y] = win.getPosition();
+    win.setPosition(x + dx, y + dy);
   });
+
+  // Global shortcut Alt+M toggles interactive mode
+  let interactive = false;
+  globalShortcut.register('Alt+M', () => {
+    if (!win) return;
+    interactive = !interactive;
+    if (interactive) {
+      win.setIgnoreMouseEvents(false);
+    } else {
+      win.setIgnoreMouseEvents(true, { forward: true });
+    }
+    win.webContents.send('toggle-interactive', interactive);
+  });
+});
+
+app.on('will-quit', () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on('window-all-closed', () => {
