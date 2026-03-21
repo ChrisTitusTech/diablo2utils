@@ -7,6 +7,7 @@ import { LogType } from './logger.js';
 import { Process } from './process.js';
 import { ScannerBuffer } from './scanner.js';
 import { D2rUnitDataItemStrut, D2rUnitDataPlayerStrut, D2rUnitStrut, UnitAnyS } from './struts/d2r.unit.any.js';
+import { D2rPathStrut } from './struts/d2r.path.js';
 import { Pointer } from './struts/pointer.js';
 import { dump } from './util/dump.js';
 
@@ -250,7 +251,18 @@ export class Diablo2Process {
             // When playerName is provided, match by name; otherwise accept
             // the first valid player unit (auto-detect mode).
             const nameMatch = playerName == null || name === playerName;
-            if (nameMatch && name.length > 0 && Pointer.isPointersValid(unit) !== 0) {
+            if (nameMatch && name.length > 0 && unit.pPath.isValid) {
+              // Verify the path has a real position — character-select
+              // ghost entries sit in the hash table with x=0, y=0 and the
+              // active in-game player may not even be linked here.
+              const path = await this.readStrutAt(unit.pPath.offset, D2rPathStrut);
+              if (path.x === 0 && path.y === 0) {
+                // Remember the name for auto-detect even though this entry is stale
+                if (!this.lastPlayerName && name.length > 0) this.lastPlayerName = name;
+                unitPtr = unit.pNext;
+                continue;
+              }
+
               this.lastOffset.player = unitPtr;
               this.lastOffset.name = unit.pData.offset;
               this.lastPlayerName = name;
@@ -278,7 +290,11 @@ export class Diablo2Process {
 
       try {
         const unit = await this.readStrutAt(this.lastOffset.player, D2rUnitStrut);
-        if (Pointer.isPointersValid(unit) !== 0) return new Diablo2Player(this, this.lastOffset.player);
+        if (unit.pData.isValid && unit.pPath.isValid) {
+          // Verify position is still valid (not a stale ghost entry)
+          const path = await this.readStrutAt(unit.pPath.offset, D2rPathStrut);
+          if (path.x > 0 || path.y > 0) return new Diablo2Player(this, this.lastOffset.player);
+        }
       } catch (e) {
         console.log('Cache:Failed', { e });
       }
@@ -288,23 +304,20 @@ export class Diablo2Process {
     const hashResult = await this.scanForPlayerInHashTable(playerName, logger);
     if (hashResult != null) return hashResult;
 
-    // Skip the slow scan during re-acquisition — the hash table scan will find
-    // the player once its pointers become valid in the new game. Retrying via
-    // the waitForPlayer loop (with its 500ms→5s backoff) is far faster than
-    // scanning all process memory for stale player-name strings.
-    if (skipSlowScan) {
+    // Strategy 3: Slow full memory scan (fallback)
+    // The hash table may only contain stale character-select entries while
+    // the active in-game player unit lives outside the hash chain.  Fall
+    // back to scanning process memory for the player name string.
+    const effectiveName = playerName ?? this.lastPlayerName;
+    if (skipSlowScan || !effectiveName) {
       logger.info({}, 'Player:HashTable:NotReady (will retry)');
       return null;
     }
 
-    // Strategy 3: Slow full memory scan (fallback — initial startup only)
-    // Requires a player name to search for in memory text.
-    if (playerName == null) {
-      logger.info({}, 'Player:AutoDetect:WaitingForHashTable');
-      return null;
-    }
+    // Phase 1: Collect all valid PlayerData addresses in a single pass.
+    const pdataAddresses: number[] = [];
     for await (const mem of this.process.scanDistance(this.lastOffset.name)) {
-      for (const nameOffset of ScannerBuffer.text(mem.buffer, playerName, 0x40)) {
+      for (const nameOffset of ScannerBuffer.text(mem.buffer, effectiveName, 0x40)) {
         const playerNameOffset = nameOffset + mem.map.start;
 
         const strut = D2rUnitDataPlayerStrut.raw(mem.buffer, nameOffset);
@@ -317,39 +330,63 @@ export class Diablo2Process {
         if (!strut.wpNightmare.isValid) continue;
         if (!strut.wpHell.isValid) continue;
 
-        logger.info({ offset: toHex(playerNameOffset) }, 'Player:Offset');
+        pdataAddresses.push(playerNameOffset);
+      }
+    }
 
-        const lastPlayer = this.lastOffset.player;
-        for await (const p of this.process.scanDistance(
-          lastPlayer,
-          (f) => lastPlayer === 0 || Math.abs(f.start - lastPlayer) < 0xff_ff_ff_ff,
-        )) {
-          for (const off of ScannerBuffer.pointer(p.buffer, playerNameOffset)) {
-            const verOffset = this.version === Diablo2Version.Classic ? 20 : 16;
-            const playerRelStrutOffset = off - verOffset;
-            const playerStrutOffset = playerRelStrutOffset + p.map.start;
+    if (pdataAddresses.length === 0) {
+      logger.warn({ playerName }, 'Player:NotFound');
+      return null;
+    }
 
-            const unit = D2rUnitStrut.raw(p.buffer, playerRelStrutOffset);
-            logger.info(
-              {
-                offset: toHex(playerNameOffset),
-                unit: toHex(playerStrutOffset),
-                pointers: Pointer.isPointersValid(unit),
-              },
-              'Player:Offset:Pointer',
-            );
+    logger.info({ count: pdataAddresses.length }, 'Player:SlowScan:Candidates');
 
-            if (Pointer.isPointersValid(unit) === 0) continue;
-            logger.info(
-              { offset: toHex(playerNameOffset), unit: toHex(playerStrutOffset) },
-              'Player:Offset:Pointer:Found',
-            );
+    // Phase 2: Single pass through memory looking for unit structs that
+    // point to any of the collected PlayerData addresses.  Each address is
+    // converted to an 8-byte LE buffer for fast Buffer.indexOf searching.
+    const pdataSearch = pdataAddresses.map((addr) => {
+      const buf = Buffer.alloc(8);
+      buf.writeBigUInt64LE(BigInt(addr));
+      return { addr, buf };
+    });
+    const verOffset = this.version === Diablo2Version.Classic ? 20 : 16;
+    const lastPlayer = this.lastOffset.player;
 
-            this.lastOffset.player = playerStrutOffset;
-            this.lastOffset.name = playerNameOffset;
+    for await (const p of this.process.scanDistance(
+      lastPlayer,
+      (f) => lastPlayer === 0 || Math.abs(f.start - lastPlayer) < 0xff_ff_ff_ff,
+    )) {
+      for (const { addr, buf } of pdataSearch) {
+        let pos = 0;
+        while (pos <= p.buffer.length - 8) {
+          const idx = p.buffer.indexOf(buf, pos);
+          if (idx === -1) break;
+          pos = idx + 1;
 
-            return new Diablo2Player(this, playerStrutOffset);
+          const playerRelStrutOffset = idx - verOffset;
+          if (playerRelStrutOffset < 0) continue;
+          const playerStrutOffset = playerRelStrutOffset + p.map.start;
+
+          const unit = D2rUnitStrut.raw(p.buffer, playerRelStrutOffset);
+          if (!unit.pData.isValid || !unit.pPath.isValid) continue;
+
+          // Verify the path has real position data — stale entries have x=0, y=0
+          try {
+            const pathData = await this.readStrutAt(unit.pPath.offset, D2rPathStrut);
+            if (pathData.x === 0 && pathData.y === 0) continue;
+          } catch {
+            continue;
           }
+
+          logger.info(
+            { offset: toHex(addr), unit: toHex(playerStrutOffset) },
+            'Player:Offset:Pointer:Found',
+          );
+
+          this.lastOffset.player = playerStrutOffset;
+          this.lastOffset.name = addr;
+
+          return new Diablo2Player(this, playerStrutOffset);
         }
       }
     }

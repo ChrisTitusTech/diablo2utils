@@ -137,23 +137,29 @@ app.whenReady().then(() => {
 
   // DWM ignores BrowserWindow x/y and manages window placement itself.
   // Set override_redirect so DWM completely ignores this window, then
-  // position it with xdotool.
+  // position it with xdotool.  Use only the newest matching window (tail -1)
+  // to avoid conflicts with stale overlay processes.
   function forcePosition() {
+    let wid;
+    try {
+      wid = execSync(
+        'xdotool search --classname diablo2-overlay 2>/dev/null | tail -1',
+        { encoding: 'utf-8', timeout: 2000 },
+      ).trim();
+    } catch { return; }
+    if (!wid) return;
     try {
       execSync(
-        'xdotool search --classname diablo2-overlay' +
-        ' set_window --overrideredirect 1 %@' +
-        ' windowunmap %@',
+        `xdotool set_window --overrideredirect 1 ${wid} windowunmap ${wid}`,
         { stdio: 'ignore', timeout: 2000 },
       );
     } catch { return; }
     setTimeout(() => {
       try {
         execSync(
-          'xdotool search --classname diablo2-overlay' +
-          ' windowmap %@' +
-          ` windowmove %@ ${startX} ${startY}` +
-          ` windowsize %@ ${startW} ${startH}`,
+          `xdotool windowmap ${wid}` +
+          ` windowmove ${wid} ${startX} ${startY}` +
+          ` windowsize ${wid} ${startW} ${startH}`,
           { stdio: 'ignore', timeout: 2000 },
         );
       } catch {}
@@ -244,6 +250,27 @@ app.whenReady().then(() => {
   });
   ipcMain.on('save-center', (_event, center) => {
     saveState({ center });
+  });
+
+  // Global shortcut F9 toggles map position between top-left and top-right
+  let mapOnRight = false;
+  globalShortcut.register('F9', () => {
+    if (!win) return;
+    mapOnRight = !mapOnRight;
+    const r = mapOnRight;
+    win.webContents.executeJavaScript(`
+      (function() {
+        var el = document.getElementById('main-map');
+        if (!el) return;
+        if (${r}) {
+          el.style.setProperty('left', 'unset', 'important');
+          el.style.setProperty('right', '0', 'important');
+        } else {
+          el.style.setProperty('right', 'unset', 'important');
+          el.style.setProperty('left', '0', 'important');
+        }
+      })();
+    `).catch(() => {});
   });
 
   // Global shortcut Alt+M toggles interactive mode (interact with map)

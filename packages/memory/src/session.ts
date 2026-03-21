@@ -193,14 +193,22 @@ export class Diablo2GameSessionMemory {
         continue;
       }
 
-      this.player = await this.d2.scanForPlayer(this.playerName || undefined, logger, true);
-      if (this.player == null) continue;
+      // Use fast hash-table scan only for the first few attempts.  If it
+      // keeps failing (e.g. the active player unit is missing from the hash
+      // table — known to happen in some D2R versions), fall back to the
+      // slower full-memory scan which can find unlinked player units.
+      const skipSlowScan = backOff <= 6; // ~3 seconds of hash-table-only tries
+      this.player = await this.d2.scanForPlayer(this.playerName || undefined, logger, skipSlowScan);
 
-      // Auto-detect: populate playerName from the unit we just found
+      // Auto-detect: populate playerName from auto-detected name even if
+      // the player unit itself wasn't found yet (name is discovered from
+      // stale hash-table entries whose path data is zero).
       if (!this.playerName && this.d2.lastPlayerName) {
         this.playerName = this.d2.lastPlayerName;
         logger.info({ player: this.playerName }, 'Player:AutoDetected');
       }
+
+      if (this.player == null) continue;
 
       return this.player;
     }
@@ -242,11 +250,12 @@ export class Diablo2GameSessionMemory {
     const currentAct = levelId > 0 ? (ActUtil.fromLevel(levelId) ?? player.actId) : player.actId;
 
     // Load ActMisc once to get both mapSeed and difficulty without double-fetching
-    const actMisc = act.pActMisc.isValid
+    const actMisc = act?.pActMisc.isValid
       ? await obj.d2.readStrutAt(act.pActMisc.offset, D2rActMiscStrut)
       : null;
-    const mapSeed = resolveMapSeed(act, actMisc, logger);
-    const mapState = this.state.map as typeof this.state.map & { levelId?: number };
+    const mapSeed = act != null ? resolveMapSeed(act, actMisc, logger) : 0;
+
+    const mapState: Record<string, unknown> & { levelId?: number } = this.state.map as any;
 
     let mapDirty = false;
     if (mapState.act !== currentAct) {
@@ -272,7 +281,7 @@ export class Diablo2GameSessionMemory {
       this.state.kills.clear();
       this.itemIgnore.clear();
       mapDirty = true;
-      this.onMapChange?.(mapSeed, mapState.difficulty, currentAct);
+      this.onMapChange?.(mapSeed, mapState.difficulty as Difficulty, currentAct);
     }
 
     if (mapDirty) this.state.dirty();
@@ -457,13 +466,14 @@ function getShiftedStat(stats: Map<Attribute, number>, stat: Attribute, shift: n
 async function resolveDifficulty(
   d2: Diablo2Process,
   actMisc: { difficulty: number } | null,
-  act: ActS,
+  act: ActS | null,
   logger: LogType,
 ): Promise<Difficulty> {
   if (actMisc && actMisc.difficulty >= 0 && actMisc.difficulty <= 2) return actMisc.difficulty;
 
   if (actMisc) logger.info({ raw: actMisc.difficulty, offset: '0x830' }, 'Player:InvalidDifficulty:FallingBack');
-  else logger.error({ offset: toHex(act.pActMisc.offset) }, 'Player:OffsetInvalid:Difficulty');
+  else if (act) logger.error({ offset: toHex(act.pActMisc.offset) }, 'Player:OffsetInvalid:Difficulty');
+  else logger.warn({}, 'Player:Act:Null:FallingBack');
 
   if (process.argv.includes('--nightmare')) return Difficulty.Nightmare;
   if (process.argv.includes('--normal')) return Difficulty.Normal;

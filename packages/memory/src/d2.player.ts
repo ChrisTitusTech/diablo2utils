@@ -27,7 +27,7 @@ export class Diablo2Player {
 
   async validate(log: LogType): Promise<UnitAnyS | null> {
     const player = await this.player;
-    if (Pointer.isPointersValid(player) === 0) {
+    if (!player.pData.isValid || !player.pPath.isValid) {
       log.warn(
         {
           unit: toHex(this.offset),
@@ -72,8 +72,11 @@ export class Diablo2Player {
     return stats;
   }
 
-  async getAct(player: UnitAnyS, logger: LogType): Promise<ActS> {
-    if (!player.pAct.isValid) logger.error({ offset: toHex(player.pAct.offset) }, 'Player:OffsetInvalid:Act');
+  async getAct(player: UnitAnyS, logger: LogType): Promise<ActS | null> {
+    if (!player.pAct.isValid) {
+      logger.warn({ offset: toHex(player.pAct.offset) }, 'Player:OffsetInvalid:Act');
+      return null;
+    }
     const act = await this.d2.readStrutAt(player.pAct.offset, D2rActStrut);
     return act;
   }
