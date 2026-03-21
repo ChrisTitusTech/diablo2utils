@@ -276,6 +276,21 @@ app.whenReady().then(() => {
   for (const key of ['-', 'numsub']) {
     globalShortcut.register(key, () => zoomMap(-1));
   }
+
+  // Reset zoom to 7
+  function resetZoom() {
+    if (!win) return;
+    win.webContents.executeJavaScript(`
+      (function() {
+        if (window.map && typeof window.map.zoomTo === 'function') {
+          window.map.zoomTo(7);
+        }
+      })();
+    `).catch(() => {});
+  }
+  for (const key of ['nummult', 'Shift+8']) {
+    globalShortcut.register(key, resetZoom);
+  }
 });
 
 app.on('will-quit', () => {
