@@ -81,13 +81,15 @@
 
   // Extract thread links from current page DOM (no need to re-parse HTML)
   function getThreadLinks() {
-    var links = document.querySelectorAll('a[href*="topic.php?t="]');
+    // Match links that contain topic.php AND a t= parameter (handles both
+    // topic.php?t=123 and topic.php?f=271&t=123 URL formats)
+    var links = document.querySelectorAll('a[href*="topic.php"]');
     var seen = {};
     var threads = [];
 
     for (var i = 0; i < links.length; i++) {
       var href = links[i].getAttribute('href') || '';
-      var m = href.match(/topic\.php\?t=(\d+)/);
+      var m = href.match(/topic\.php\?(?:[^#]*&)?t=(\d+)/);
       if (!m) continue;
 
       var tid = m[1];
@@ -111,6 +113,14 @@
     return threads;
   }
 
+  // Check which threads are already imported
+  function getImportedThreadIds() {
+    return fetch(API + '/api/threads')
+      .then(function (r) { return r.json(); })
+      .then(function (data) { return new Set(data.thread_ids || []); })
+      .catch(function () { return new Set(); });
+  }
+
   // --- Main flow ---
   async function run() {
     try {
@@ -123,8 +133,24 @@
         return;
       }
 
+      // Filter out already-imported threads
+      setStatus('Checking for duplicates...');
+      var existing = await getImportedThreadIds();
+      var newThreads = threads.filter(function (t) { return !existing.has(t.id); });
+      var dupeCount = threads.length - newThreads.length;
+      if (dupeCount > 0) {
+        addLog('Skipping ' + dupeCount + ' already-imported threads');
+      }
+      threads = newThreads;
+
+      if (threads.length === 0) {
+        setStatus('All threads already imported!');
+        addLog('--- Nothing new to import ---');
+        return;
+      }
+
       setProgress(0, threads.length);
-      setStatus('Crawling threads...');
+      setStatus('Crawling ' + threads.length + ' new threads...');
 
       var imported = 0;
       var skipped = 0;
@@ -185,17 +211,6 @@
 
       // Done
       setStatus('Done! ' + imported + ' imported, ' + skipped + ' updated, ' + errors + ' errors');
-      setProgress(threads.length, threads.length);
-      addLog('--- Complete ---');
-    } catch (err) {
-      setStatus('Error: ' + err.message);
-      addLog(err.message, true);
-    }
-  }
-      }
-
-      // Done
-      setStatus('Done! ' + imported + ' imported, ' + skipped + ' skipped, ' + errors + ' errors');
       setProgress(threads.length, threads.length);
       addLog('--- Complete ---');
     } catch (err) {

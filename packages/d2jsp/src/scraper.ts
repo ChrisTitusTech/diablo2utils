@@ -70,7 +70,7 @@ export function parseForumPage(html: string): ForumThread[] {
 
   for (const link of links) {
     const href = link.getAttribute('href') || '';
-    const match = href.match(/topic\.php\?t=(\d+)(?:&f=(\d+))?/);
+    const match = href.match(/topic\.php\?(?:[^#]*&)?t=(\d+)/);
     if (!match) continue;
 
     const threadId = match[1];

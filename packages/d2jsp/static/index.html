@@ -282,11 +282,12 @@
         const name = r.item_name || r.title;
         const thread = r.title || '';
         const date = r.post_date || '';
+        const threadUrl = r.thread_id ? `https://forums.d2jsp.org/topic.php?t=${encodeURIComponent(r.thread_id)}` : '';
 
         html += `<tr>
           <td class="title-cell">${escapeHtml(name)}</td>
           <td class="price">${escapeHtml(price)}</td>
-          <td class="description">${escapeHtml(thread)}</td>
+          <td class="description">${threadUrl ? `<a href="${threadUrl}" target="_blank" style="color:#8ab4f8;text-decoration:none" title="Open on d2jsp">${escapeHtml(thread)}</a>` : escapeHtml(thread)}</td>
           <td class="date">${escapeHtml(date)}</td>
         </tr>`;
       }

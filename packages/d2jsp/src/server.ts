@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { DatabaseSync } from 'node:sqlite';
-import { searchPosts, getStats, cleanupNoPrice } from './db.js';
+import { searchPosts, getStats, cleanupNoPrice, getThreadIds } from './db.js';
 import { importHtml } from './import.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,6 +75,16 @@ export function createServer(opts: ServerOptions): { app: express.Express; start
     } catch (err) {
       logger.warn(`Import error: ${err}`);
       res.status(500).json({ error: 'Import failed' });
+    }
+  });
+
+  // Return list of already-imported thread IDs (for dedup in bookmarklet)
+  app.get('/api/threads', (_req, res) => {
+    try {
+      const ids = getThreadIds(db);
+      res.json({ thread_ids: ids });
+    } catch (err) {
+      res.status(500).json({ error: 'Failed to get thread IDs' });
     }
   });
 

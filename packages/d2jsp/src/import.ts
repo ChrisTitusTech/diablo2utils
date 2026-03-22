@@ -98,7 +98,7 @@ export function importHtml(
     }
   } else {
     // Parse as single thread — extract full details including multiple items
-    const threadIdMatch = html.match(/topic\.php\?t=(\d+)/);
+    const threadIdMatch = html.match(/topic\.php\?(?:[^#]*&)?t=(\d+)/);
     const threadId = threadIdMatch ? threadIdMatch[1] : `manual-${Date.now()}`;
 
     const detail = parseThread(html, threadId);

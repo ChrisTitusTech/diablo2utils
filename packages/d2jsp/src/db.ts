@@ -154,6 +154,11 @@ export function hasThread(db: DatabaseSync, threadId: string): boolean {
   return row != null;
 }
 
+export function getThreadIds(db: DatabaseSync): string[] {
+  const rows = db.prepare('SELECT DISTINCT thread_id FROM trade_posts').all() as unknown as { thread_id: string }[];
+  return rows.map(r => r.thread_id);
+}
+
 export function cleanupNoPrice(db: DatabaseSync): number {
   const count = db.prepare('SELECT COUNT(*) as cnt FROM trade_posts WHERE price_fg IS NULL').get() as unknown as { cnt: number };
   db.exec('DELETE FROM trade_posts WHERE price_fg IS NULL');
