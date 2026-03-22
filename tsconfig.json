@@ -12,6 +12,6 @@
         { "path": "./packages/map" },
         { "path": "./packages/memory" },
         { "path": "./packages/overlay" },
-
+        { "path": "./packages/d2jsp" }
     ]
 }

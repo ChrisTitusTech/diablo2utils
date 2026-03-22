@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>d2jsp Trade Search</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      min-height: 100vh;
+    }
+    .container { max-width: 1000px; margin: 0 auto; padding: 20px; }
+    header {
+      text-align: center;
+      padding: 30px 0 20px;
+    }
+    header h1 {
+      color: #c4a032;
+      font-size: 1.8rem;
+      margin-bottom: 5px;
+    }
+    header .subtitle { color: #888; font-size: 0.9rem; }
+    .search-box {
+      display: flex;
+      gap: 10px;
+      margin: 20px 0;
+    }
+    .search-box input {
+      flex: 1;
+      padding: 12px 16px;
+      font-size: 1rem;
+      border: 2px solid #333;
+      border-radius: 6px;
+      background: #16213e;
+      color: #e0e0e0;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-box input:focus { border-color: #c4a032; }
+    .search-box input::placeholder { color: #666; }
+    .stats {
+      text-align: center;
+      font-size: 0.85rem;
+      color: #666;
+      margin-bottom: 15px;
+    }
+    .results-info {
+      font-size: 0.9rem;
+      color: #888;
+      margin-bottom: 10px;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th {
+      text-align: left;
+      padding: 10px 12px;
+      border-bottom: 2px solid #333;
+      color: #c4a032;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid #222;
+      font-size: 0.9rem;
+      vertical-align: top;
+    }
+    tr:hover td { background: #16213e; }
+    .price { color: #4ec94e; font-weight: 600; white-space: nowrap; }
+    .date { color: #888; white-space: nowrap; font-size: 0.85rem; }
+    .description {
+      max-width: 400px;
+      max-height: 60px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #aaa;
+      font-size: 0.85rem;
+      line-height: 1.4;
+    }
+    .title-cell { color: #ddd; font-weight: 500; }
+    .no-results {
+      text-align: center;
+      padding: 40px;
+      color: #666;
+      font-size: 1.1rem;
+    }
+    .loading {
+      text-align: center;
+      padding: 20px;
+      color: #888;
+    }
+    .import-section {
+      margin-top: 30px;
+      padding: 20px;
+      border: 1px dashed #333;
+      border-radius: 8px;
+      background: #16213e;
+    }
+    .import-section h3 {
+      color: #c4a032;
+      margin-bottom: 10px;
+      font-size: 1rem;
+    }
+    .import-section p {
+      color: #888;
+      font-size: 0.85rem;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+    .import-section textarea {
+      width: 100%;
+      height: 100px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 10px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      resize: vertical;
+    }
+    .import-section textarea:focus { border-color: #c4a032; outline: none; }
+    .btn {
+      padding: 8px 16px;
+      background: #c4a032;
+      color: #1a1a2e;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 0.9rem;
+      margin-top: 8px;
+    }
+    .btn:hover { background: #d4b042; }
+    .btn:disabled { background: #555; cursor: not-allowed; }
+    .import-result {
+      margin-top: 10px;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-size: 0.85rem;
+    }
+    .import-result.success { background: #1a3a1a; color: #4ec94e; }
+    .import-result.error { background: #3a1a1a; color: #c94e4e; }
+    .file-input-wrapper { margin-top: 10px; }
+    .file-input-wrapper input[type="file"] { color: #888; font-size: 0.85rem; }
+    @media (max-width: 700px) {
+      .description { display: none; }
+      th:nth-child(3), td:nth-child(3) { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>d2jsp Trade Search</h1>
+      <div class="subtitle">D2R Softcore Ladder Trade Listings</div>
+    </header>
+
+    <div class="stats" id="stats">Loading stats...</div>
+
+    <div class="search-box">
+      <input type="text" id="search" placeholder="Search items... (e.g. shako, griffon, enigma)" autofocus>
+    </div>
+
+    <div class="results-info" id="results-info"></div>
+
+    <div id="results"></div>
+
+    <div class="import-section">
+      <h3>Chrome Bookmarklet (Recommended)</h3>
+      <p>
+        Drag this button to your bookmarks bar. Then visit any
+        <a href="https://forums.d2jsp.org/forum.php?f=271&t=3" target="_blank" style="color:#c4a032">d2jsp forum page</a>
+        and click it &mdash; it will auto-import the listing <em>and</em> crawl every thread on the page.
+      </p>
+      <p style="text-align:center;margin:14px 0">
+        <a id="bookmarklet" href="#" class="btn"
+           style="display:inline-block;text-decoration:none;font-size:1rem;padding:10px 20px;cursor:grab"
+           title="Drag me to your bookmarks bar!">&#x1f4e5; Import d2jsp</a>
+      </p>
+      <p style="font-size:0.8rem;color:#666">
+        Tip: If the bookmarks bar is hidden, press <kbd style="background:#333;padding:2px 5px;border-radius:3px">Ctrl+Shift+B</kbd> to show it.
+      </p>
+    </div>
+
+    <div class="import-section" style="margin-top:15px">
+      <h3>Manual Import</h3>
+      <p>
+        Alternatively, upload saved HTML files or paste HTML source:
+      </p>
+      <div class="file-input-wrapper">
+        <input type="file" id="htmlFiles" accept=".html,.htm" multiple>
+      </div>
+      <div style="margin-top: 10px; color: #666; font-size: 0.8rem;">— or paste HTML source —</div>
+      <textarea id="htmlPaste" placeholder="Paste HTML source code here..."></textarea>
+      <br>
+      <button class="btn" id="importBtn" onclick="doImport()">Import</button>
+      <div id="importResult"></div>
+    </div>
+  </div>
+
+  <script>
+    const searchInput = document.getElementById('search');
+    const resultsDiv = document.getElementById('results');
+    const resultsInfo = document.getElementById('results-info');
+    const statsDiv = document.getElementById('stats');
+    let debounceTimer = null;
+
+    // Load stats
+    fetch('/api/stats')
+      .then(r => r.json())
+      .then(data => {
+        const lastDate = data.last_scraped ? new Date(data.last_scraped).toLocaleString() : 'never';
+        statsDiv.textContent = `${data.total_posts.toLocaleString()} trade posts indexed | Last scraped: ${lastDate}`;
+      })
+      .catch(() => { statsDiv.textContent = ''; });
+
+    // Load recent posts on page load
+    doSearch('');
+
+    searchInput.addEventListener('input', () => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => {
+        doSearch(searchInput.value);
+      }, 300);
+    });
+
+    function doSearch(query) {
+      const params = new URLSearchParams();
+      if (query) params.set('q', query);
+      params.set('limit', '100');
+
+      resultsDiv.innerHTML = '<div class="loading">Searching...</div>';
+
+      fetch('/api/search?' + params.toString())
+        .then(r => r.json())
+        .then(data => {
+          resultsInfo.textContent = query
+            ? `${data.count} result${data.count !== 1 ? 's' : ''} for "${data.query}"`
+            : `Showing ${data.count} most recent posts`;
+          renderResults(data.results);
+        })
+        .catch(err => {
+          resultsDiv.innerHTML = '<div class="no-results">Search failed. Is the server running?</div>';
+          resultsInfo.textContent = '';
+        });
+    }
+
+    function renderResults(results) {
+      if (!results || results.length === 0) {
+        resultsDiv.innerHTML = '<div class="no-results">No results found</div>';
+        return;
+      }
+
+      const escapeHtml = (str) => {
+        if (!str) return '';
+        const div = document.createElement('div');
+        div.textContent = str;
+        return div.innerHTML;
+      };
+
+      let html = `<table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Price</th>
+            <th>Thread</th>
+            <th>Date</th>
+          </tr>
+        </thead>
+        <tbody>`;
+
+      for (const r of results) {
+        const price = r.price_fg || '—';
+        const name = r.item_name || r.title;
+        const thread = r.title || '';
+        const date = r.post_date || '';
+
+        html += `<tr>
+          <td class="title-cell">${escapeHtml(name)}</td>
+          <td class="price">${escapeHtml(price)}</td>
+          <td class="description">${escapeHtml(thread)}</td>
+          <td class="date">${escapeHtml(date)}</td>
+        </tr>`;
+      }
+
+      html += '</tbody></table>';
+      resultsDiv.innerHTML = html;
+    }
+
+    // Import functionality
+    async function doImport() {
+      const btn = document.getElementById('importBtn');
+      const resultDiv = document.getElementById('importResult');
+      const pasteArea = document.getElementById('htmlPaste');
+      const fileInput = document.getElementById('htmlFiles');
+
+      btn.disabled = true;
+      resultDiv.innerHTML = '';
+
+      const htmlSources = [];
+
+      // Collect from file uploads
+      if (fileInput.files.length > 0) {
+        for (const file of fileInput.files) {
+          const text = await file.text();
+          htmlSources.push({ name: file.name, html: text });
+        }
+      }
+
+      // Collect from paste area
+      if (pasteArea.value.trim().length > 50) {
+        htmlSources.push({ name: 'pasted', html: pasteArea.value });
+      }
+
+      if (htmlSources.length === 0) {
+        resultDiv.innerHTML = '<div class="import-result error">Please upload HTML file(s) or paste HTML source</div>';
+        btn.disabled = false;
+        return;
+      }
+
+      let totalImported = 0;
+      let totalSkipped = 0;
+      let errors = [];
+
+      for (const source of htmlSources) {
+        try {
+          const res = await fetch('/api/import', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ html: source.html }),
+          });
+          const data = await res.json();
+          if (res.ok) {
+            totalImported += data.imported || 0;
+            totalSkipped += data.skipped || 0;
+          } else {
+            errors.push(`${source.name}: ${data.error}`);
+          }
+        } catch (err) {
+          errors.push(`${source.name}: ${err.message}`);
+        }
+      }
+
+      let msg = `Imported ${totalImported} posts, ${totalSkipped} skipped.`;
+      if (errors.length > 0) msg += ' Errors: ' + errors.join('; ');
+      const cls = errors.length > 0 ? 'error' : 'success';
+      resultDiv.innerHTML = `<div class="import-result ${cls}">${msg}</div>`;
+
+      btn.disabled = false;
+      pasteArea.value = '';
+      fileInput.value = '';
+
+      // Refresh stats and results
+      fetch('/api/stats').then(r => r.json()).then(data => {
+        const lastDate = data.last_scraped ? new Date(data.last_scraped).toLocaleString() : 'never';
+        statsDiv.textContent = `${data.total_posts.toLocaleString()} trade posts indexed | Last scraped: ${lastDate}`;
+      });
+      doSearch(searchInput.value);
+    }
+
+    // Build bookmarklet href dynamically so it always points at the current host
+    (function() {
+      var bmk = document.getElementById('bookmarklet');
+      var code = "javascript:void(document.head.appendChild(Object.assign(document.createElement('script'),{src:'" +
+        location.origin + "/d2jsp-import.js?'+Date.now()})))";
+      bmk.href = code;
+    })();
+  </script>
+</body>
+</html>
