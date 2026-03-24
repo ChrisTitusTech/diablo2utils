@@ -4,9 +4,11 @@ FROM ubuntu:22.04 AS build
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends --no-install-suggests git -y \
-    mingw-w64
+RUN printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\n' > /etc/resolv.conf \
+    && printf 'Acquire::Retries "5";\nAcquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/80-networking \
+    && apt-get update \
+    && apt-get install --no-install-recommends --no-install-suggests -y git mingw-w64 python3-minimal \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /build/map
 COPY ./map /build/map
@@ -29,7 +31,9 @@ ENV WINEARCH=win32
 ENV WINEDEBUG=-all
 
 # Enable 32-bit architecture required by Wine
-RUN dpkg --add-architecture i386 \
+RUN printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\n' > /etc/resolv.conf \
+    && printf 'Acquire::Retries "5";\nAcquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/80-networking \
+    && dpkg --add-architecture i386 \
     && apt-get update -yq \
     && apt-get install -yq --no-install-recommends \
         ca-certificates curl gnupg \
@@ -42,7 +46,8 @@ VOLUME [ "/app/game" ]
 
 WORKDIR /app
 RUN npm init --yes
-RUN npm install canvas@3.2.1
+RUN printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\n' > /etc/resolv.conf \
+    && npm install canvas@3.2.1
 
 ADD dist/ /app/
 

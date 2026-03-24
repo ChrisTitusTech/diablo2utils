@@ -11,6 +11,7 @@
   "license": "MIT",
   "scripts": {
     "launch": "node node_modules/electron/dist/electron packages/launcher/electron/main.mjs",
+    "install:deps": "bash ./install-dependencies.sh",
     "build": "tsc -b",
     "bump": "npx lerna version --conventional-commits --no-push --sign-git-commit --sign-git-tag -m 'release: %s'",
     "lint": "eslint \"packages/*/src/**/*.ts\" --quiet --fix --report-unused-disable-directives",

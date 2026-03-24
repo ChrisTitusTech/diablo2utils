@@ -12,8 +12,8 @@ import { Diablo2MapGenMessage, MapGenMessageInfo, MapGenMessageMap } from './map
 import { F_OK } from 'constants';
 
 export const MapCommand = ['./bin/d2-map.exe', '../bin/d2-map.exe'];
-export const Diablo2Path = '/app/game';
-export const RegistryPath = '/app/d2.install.reg';
+export const Diablo2Path = process.env['D2_PATH'] ?? '/app/game';
+export const RegistryPath = process.env['D2_REG_PATH'] ?? '/app/d2.install.reg';
 export const WineCommand = 'wine';
 
 /** Wait at most 10 seconds for things to work */

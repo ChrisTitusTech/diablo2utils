@@ -17,10 +17,36 @@ Tools to work with diablo2
 
 ## Building
 
+Install workspace dependencies from the repository root:
 
-Building with yarn
-
+```bash
+./install-dependencies.sh
 ```
+
+Or, if Yarn is already available:
+
+```bash
+yarn install:deps
+```
+
+Build the TypeScript workspace packages from the repository root:
+
+```bash
+yarn build
+```
+
+This root build covers the TypeScript project references under `packages/*`.
+
+The overlay package is not part of the root TypeScript solution build. Build it separately from [packages/overlay/README.md](./packages/overlay/README.md):
+
+```bash
+cd packages/overlay
+./build.sh
+```
+
+If you already have Yarn installed and just want the combined root flow:
+
+```bash
 yarn
 yarn build
 ```

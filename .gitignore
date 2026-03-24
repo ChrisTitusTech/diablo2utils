@@ -16,3 +16,4 @@ packages/overlay/src-tauri/target/
 assets/d2/*.mpq
 assets/d2/*.MPQ
 assets/d2/Save/
+assets/d2/**

@@ -1,8 +1,19 @@
 import { Diablo2Mpq, Diablo2MpqData } from '@diablo2/data';
 import { Mpq } from '@diablo2/mpq';
 import { StrutInfer, StrutType } from 'binparse';
+import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from './log.type.js';
+
+/** Resolve a filename case-insensitively within a directory (for Linux). */
+function resolveFile(dir: string, name: string): string {
+  const lower = name.toLowerCase();
+  try {
+    const match = fs.readdirSync(dir).find((f) => f.toLowerCase() === lower);
+    if (match) return path.join(dir, match);
+  } catch {}
+  return path.join(dir, name);
+}
 import { ItemFileParser } from './readers/item.reader.js';
 import { LangReader } from './readers/lang.reader.js';
 import { LevelReader } from './readers/level.reader.js';
@@ -48,9 +59,9 @@ export class Diablo2MpqLoader {
   static async load(basePath: string, log?: Logger, data = Diablo2Mpq): Promise<Diablo2MpqData> {
     log?.info({ mpq: basePath }, 'Mpq:Load');
 
-    this.MpqPatch = Mpq.load(path.join(basePath, 'patch_d2.mpq'));
-    this.MpqData = Mpq.load(path.join(basePath, 'd2data.mpq'));
-    this.MpqExp = Mpq.load(path.join(basePath, 'd2exp.mpq'));
+    this.MpqPatch = Mpq.load(resolveFile(basePath, 'patch_d2.mpq'));
+    this.MpqData = Mpq.load(resolveFile(basePath, 'd2data.mpq'));
+    this.MpqExp = Mpq.load(resolveFile(basePath, 'd2exp.mpq'));
 
     const startTime = Date.now();
     await Promise.all([this.MpqData.header, this.MpqExp.header, this.MpqPatch.header]);

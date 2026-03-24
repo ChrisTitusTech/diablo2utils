@@ -75,11 +75,8 @@ function getServiceDefs(cfg) {
         if (!existsSync(binLink)) {
           try { symlinkSync(mapBin, binLink); } catch {}
         }
-        if (!existsSync(join('/app', 'game'))) {
-          return (
-            'Missing /app/game symlink. Run once: ' +
-            `sudo mkdir -p /app && sudo ln -sfn "${cfg.d2Path}" /app/game`
-          );
+        if (!existsSync(cfg.d2Path)) {
+          return `D2 path not found: ${cfg.d2Path}`;
         }
         return null;
       },
@@ -92,6 +89,7 @@ function getServiceDefs(cfg) {
             ...process.env,
             PORT: String(cfg.port),
             D2_PATH: cfg.d2Path,
+            D2_REG_PATH: join(REPO_ROOT, 'packages', 'map', 'd2.install.reg'),
             WINEPREFIX: cfg.winePrefix,
           },
         };
