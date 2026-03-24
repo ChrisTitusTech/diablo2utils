@@ -1,0 +1,23 @@
+{
+  "name": "@diablo2/launcher",
+  "version": "0.9.0",
+  "private": "true",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/blacha/diablo2.git",
+    "directory": "packages/launcher"
+  },
+  "author": {
+    "name": "Blayne Chard",
+    "email": "blayne@chard.com"
+  },
+  "type": "module",
+  "license": "MIT",
+  "main": "electron/main.mjs",
+  "scripts": {
+    "start": "electron electron/main.mjs"
+  },
+  "dependencies": {
+    "electron": "^35.0.0"
+  }
+}

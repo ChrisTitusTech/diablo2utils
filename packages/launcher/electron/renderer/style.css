@@ -1,0 +1,316 @@
+/* ============================================================
+   D2R Launcher — Dark theme with D2 gold accents
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --bg:          #1a1a1a;
+  --bg-card:     #242424;
+  --bg-header:   #111111;
+  --bg-input:    #2e2e2e;
+  --bg-log:      #0d0d0d;
+  --border:      #333333;
+
+  --gold:        #c8a96e;
+  --gold-dim:    #8a6f3a;
+
+  --text:        #d0cfcb;
+  --text-dim:    #777;
+  --text-log:    #a8a8a8;
+
+  --green:       #4caf6a;
+  --yellow:      #e5c04b;
+  --red:         #d94f4f;
+  --grey:        #555;
+
+  --radius:      6px;
+  --transition:  0.15s ease;
+}
+
+html, body {
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+/* ---- Header ---- */
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 20px;
+  background: var(--bg-header);
+  border-bottom: 1px solid var(--gold-dim);
+  -webkit-app-region: drag;
+}
+
+header h1 {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--gold);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  flex: 1;
+}
+
+.global-actions {
+  display: flex;
+  gap: 8px;
+  -webkit-app-region: no-drag;
+}
+
+/* ---- Buttons ---- */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 14px;
+  border: none;
+  border-radius: var(--radius);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: filter var(--transition), opacity var(--transition);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.btn:not(:disabled):hover { filter: brightness(1.15); }
+.btn:not(:disabled):active { filter: brightness(0.9); }
+
+.btn-primary {
+  background: var(--gold-dim);
+  color: #fdebc8;
+}
+
+.btn-danger {
+  background: #6b2020;
+  color: #f5b8b8;
+}
+
+/* ---- Main content ---- */
+
+main {
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+  height: calc(100vh - 48px);
+}
+
+/* ---- Service cards ---- */
+
+.services {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.service-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: rgba(0,0,0,0.2);
+  border-bottom: 1px solid var(--border);
+}
+
+.card-header h2 {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--gold);
+  flex: 1;
+}
+
+.card-actions {
+  display: flex;
+  gap: 6px;
+}
+
+/* ---- Status dot ---- */
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--grey);
+  transition: background var(--transition), box-shadow var(--transition);
+}
+
+.status-dot[data-status="running"]  {
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+}
+.status-dot[data-status="starting"] {
+  background: var(--yellow);
+  box-shadow: 0 0 6px var(--yellow);
+  animation: pulse 1s ease-in-out infinite;
+}
+.status-dot[data-status="error"]    {
+  background: var(--red);
+  box-shadow: 0 0 6px var(--red);
+}
+.status-dot[data-status="stopped"]  { background: var(--grey); }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+.status-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  min-width: 56px;
+  text-align: right;
+}
+
+.status-label[data-status="running"]  { color: var(--green); }
+.status-label[data-status="starting"] { color: var(--yellow); }
+.status-label[data-status="error"]    { color: var(--red); }
+
+/* ---- Card body / logs ---- */
+
+.card-body {
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.log-desc {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.log-wrap {
+  position: relative;
+}
+
+.log-output {
+  display: block;
+  width: 100%;
+  height: 120px;
+  resize: vertical;
+  background: var(--bg-log);
+  border: 1px solid #222;
+  border-radius: 4px;
+  color: var(--text-log);
+  font-family: 'Consolas', 'Fira Mono', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 6px 8px;
+  outline: none;
+  overflow-y: auto;
+}
+
+/* ---- Config section ---- */
+
+.config-section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-card);
+  overflow: hidden;
+}
+
+.config-section details summary {
+  padding: 10px 14px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--gold-dim);
+  background: rgba(0,0,0,0.15);
+  border-bottom: 1px solid transparent;
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.config-section details summary::before {
+  content: '▶';
+  font-size: 9px;
+  transition: transform var(--transition);
+}
+
+.config-section details[open] summary {
+  border-bottom-color: var(--border);
+}
+
+.config-section details[open] summary::before {
+  transform: rotate(90deg);
+}
+
+#config-form {
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.config-row {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  align-items: center;
+  gap: 10px;
+}
+
+.config-row label {
+  font-size: 12px;
+  color: var(--text-dim);
+  text-align: right;
+}
+
+.config-row input {
+  background: var(--bg-input);
+  border: 1px solid #444;
+  border-radius: 4px;
+  color: var(--text);
+  font-size: 12px;
+  padding: 5px 8px;
+  outline: none;
+  transition: border-color var(--transition);
+}
+
+.config-row input:focus {
+  border-color: var(--gold-dim);
+}
+
+.config-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  justify-content: flex-end;
+  padding-top: 4px;
+}
+
+.saved-msg {
+  font-size: 11px;
+  color: var(--green);
+}

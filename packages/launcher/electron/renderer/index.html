@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D2R Launcher</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <header>
+    <h1>D2R Launcher</h1>
+    <div class="global-actions">
+      <button id="btn-start-all" class="btn btn-primary">&#9654; Start All</button>
+      <button id="btn-stop-all" class="btn btn-danger">&#9632; Stop All</button>
+    </div>
+  </header>
+
+  <main>
+    <section class="services">
+
+      <article class="service-card" data-id="map">
+        <div class="card-header">
+          <span class="status-dot" data-id="map"></span>
+          <h2>Map Server</h2>
+          <span class="status-label" data-id="map">stopped</span>
+          <div class="card-actions">
+            <button class="btn btn-primary btn-start" data-id="map">Start</button>
+            <button class="btn btn-danger btn-stop" data-id="map" disabled>Stop</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="log-desc">Express HTTP server on port 8899 — generates D2 map layouts</div>
+          <div class="log-wrap">
+            <textarea class="log-output" id="log-map" readonly spellcheck="false"></textarea>
+          </div>
+        </div>
+      </article>
+
+      <article class="service-card" data-id="memory">
+        <div class="card-header">
+          <span class="status-dot" data-id="memory"></span>
+          <h2>Memory Reader</h2>
+          <span class="status-label" data-id="memory">stopped</span>
+          <div class="card-actions">
+            <button class="btn btn-primary btn-start" data-id="memory">Start</button>
+            <button class="btn btn-danger btn-stop" data-id="memory" disabled>Stop</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="log-desc">Reads D2R process memory — posts seed, difficulty &amp; act to map server</div>
+          <div class="log-wrap">
+            <textarea class="log-output" id="log-memory" readonly spellcheck="false"></textarea>
+          </div>
+        </div>
+      </article>
+
+      <article class="service-card" data-id="overlay">
+        <div class="card-header">
+          <span class="status-dot" data-id="overlay"></span>
+          <h2>Overlay</h2>
+          <span class="status-label" data-id="overlay">stopped</span>
+          <div class="card-actions">
+            <button class="btn btn-primary btn-start" data-id="overlay">Start</button>
+            <button class="btn btn-danger btn-stop" data-id="overlay" disabled>Stop</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="log-desc">Transparent minimap overlay on top of D2R — requires map server running</div>
+          <div class="log-wrap">
+            <textarea class="log-output" id="log-overlay" readonly spellcheck="false"></textarea>
+          </div>
+        </div>
+      </article>
+
+    </section>
+
+    <section class="config-section">
+      <details>
+        <summary>Configuration</summary>
+        <form id="config-form">
+          <div class="config-row">
+            <label for="cfg-port">Map Server Port</label>
+            <input id="cfg-port" type="number" name="port" min="1" max="65535" />
+          </div>
+          <div class="config-row">
+            <label for="cfg-d2-path">D2 Assets Path</label>
+            <input id="cfg-d2-path" type="text" name="d2Path" />
+          </div>
+          <div class="config-row">
+            <label for="cfg-wine-prefix">Wine Prefix</label>
+            <input id="cfg-wine-prefix" type="text" name="winePrefix" />
+          </div>
+          <div class="config-row">
+            <label for="cfg-map-url">Map Server URL</label>
+            <input id="cfg-map-url" type="text" name="mapServerUrl" />
+          </div>
+          <div class="config-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+            <span id="cfg-saved-msg" class="saved-msg" hidden>Saved.</span>
+          </div>
+        </form>
+      </details>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
